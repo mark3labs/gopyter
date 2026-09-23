@@ -76,6 +76,18 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
   Re-running a cell replaces what it declared. Everything else runs inside a
   generated `main()` in a fresh process, so local variables don't carry over;
   keep shared state in package-level `var`s.
+- A persisted `var` is re-initialized in every later cell (each cell is a new
+  process). To compute an expensive value once, wrap it in `Cache` or
+  `CacheErr`, which store the result (gob-encoded, so exported fields only) in
+  the kernel workspace:
+
+  ```go
+  var resp, err = CacheErr("resp", func() (*jev.Response, error) {
+      return client.SystemOne(ctx, msg, criteria)
+  })
+  ```
+
+  `CacheErr` does not store failed results. `%cache clear resp` forces a recompute.
 - Imports are added automatically, and third-party modules are fetched on first use.
 - `Display(v...)` and `DisplayMarkdown(s)` produce rich output.
 
@@ -86,6 +98,9 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
 | `%env K=V`       | set environment variables for your programs   |
 | `%args a b`      | set program arguments                         |
 | `%ls`            | list persisted declarations                   |
+| `%rm name...`    | forget declarations or imports                |
+| `%cache`         | list cached values                            |
+| `%cache clear [key...]` | delete cached values                   |
 | `%workspace`     | print the kernel workspace directory          |
 | `%help`          | show this list                                |
 
