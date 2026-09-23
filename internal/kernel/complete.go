@@ -1,0 +1,235 @@
+package kernel
+
+import (
+	"go/scanner"
+	"go/token"
+	"os"
+	"path"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// CompletionDirName is the sub-package of the workspace used for code
+// completion. It is separate from the execution package so that editing
+// never interferes with the program being built.
+const CompletionDirName = "gopyter_complete"
+
+// CompletionWorkspace prepares the completion package and returns the path
+// of its source file. The file content itself is supplied to gopls as an
+// in-memory overlay.
+func (k *Kernel) CompletionWorkspace() (string, error) {
+	dir := filepath.Join(k.Dir, CompletionDirName)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "gopyter_helpers.go"), []byte(helpersSrc), 0o644); err != nil {
+		return "", err
+	}
+	file := filepath.Join(dir, "main.go")
+	if _, err := os.Stat(file); err != nil {
+		if err := os.WriteFile(file, []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+			return "", err
+		}
+	}
+	return file, nil
+}
+
+// CompletionSource is a Go file mirroring a cell in the context of the
+// kernel's persisted declarations, for use with gopls.
+type CompletionSource struct {
+	Content string
+	// Line and Col locate the cursor in Content (0-based line, byte column).
+	Line, Col int
+}
+
+// lineWriter tracks the current line while building a file.
+type lineWriter struct {
+	b    strings.Builder
+	line int
+}
+
+func (w *lineWriter) write(s string) {
+	w.b.WriteString(s)
+	w.line += strings.Count(s, "\n")
+}
+
+// CompletionSource builds a file for completing cell src with the cursor
+// at (row, col), where col is a rune offset in the row.
+//
+// The cell is split like it would be for execution, but tolerantly (the
+// code is usually incomplete while typing): declarations go to the top
+// level and statements into main(). Every chunk is copied verbatim and
+// indented to its original column, so positions map back exactly.
+//
+// resolve, if non-nil, maps package names referenced as "name." in the
+// cell to import paths, so that completion works with full type
+// information before the cell has ever been run.
+func (k *Kernel) CompletionSource(cellID, src string, row, col int, resolve func(name string) (string, bool)) CompletionSource {
+	lines := strings.Split(src, "\n")
+	// Blank shell commands and magics, preserving positions.
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "!") || strings.HasPrefix(t, "%") {
+			lines[i] = strings.Repeat(" ", len(l))
+		}
+	}
+	src = strings.Join(lines, "\n")
+
+	// Cursor byte offset.
+	row = min(max(row, 0), len(lines)-1)
+	off := 0
+	for i := range row {
+		off += len(lines[i]) + 1
+	}
+	line := []rune(lines[row])
+	col = min(max(col, 0), len(line))
+	cursorByteCol := len(string(line[:col]))
+	off += cursorByteCol
+
+	chunks := splitChunks(src)
+	cursorChunk := -1
+	for i, c := range chunks {
+		if c.start <= off && off <= c.end {
+			cursorChunk = i
+		}
+	}
+
+	var imports, decls, stmts []int
+	for i, c := range chunks {
+		text := strings.TrimSpace(src[c.start:c.end])
+		switch {
+		case c.decl && strings.HasPrefix(text, "import"):
+			imports = append(imports, i)
+		case c.decl:
+			decls = append(decls, i)
+		default:
+			stmts = append(stmts, i)
+		}
+	}
+
+	k.mu.Lock()
+	// Explicit imports of other cells, plus those goimports resolved on
+	// the last build (so e.g. fmt members come with full signatures).
+	var prevImports []*Import
+	seenPath := map[string]bool{}
+	for _, imp := range k.imports {
+		if imp.CellID != cellID && !seenPath[imp.Path] {
+			seenPath[imp.Path] = true
+			prevImports = append(prevImports, imp)
+		}
+	}
+	for _, imp := range k.resolved {
+		if !seenPath[imp.Path] && imp.Name != "_" {
+			seenPath[imp.Path] = true
+			prevImports = append(prevImports, imp)
+		}
+	}
+	var prevDecls []string
+	for _, d := range k.decls {
+		if d.CellID != cellID && d.Raw != "" {
+			prevDecls = append(prevDecls, d.Raw)
+		}
+	}
+	k.mu.Unlock()
+
+	var w lineWriter
+	var res CompletionSource
+	emit := func(i int) {
+		c := chunks[i]
+		startLine := w.line
+		w.write(strings.Repeat(" ", c.col-1))
+		w.write(src[c.start:c.end])
+		w.write("\n")
+		if i == cursorChunk {
+			before := src[c.start:off]
+			res.Line = startLine + strings.Count(before, "\n")
+			if nl := strings.LastIndexByte(before, '\n'); nl >= 0 {
+				res.Col = len(before) - nl - 1
+			} else {
+				res.Col = c.col - 1 + len(before)
+			}
+		}
+	}
+
+	// Standard library packages referenced by the cell but not imported.
+	if resolve != nil {
+		have := map[string]bool{}
+		for _, imp := range prevImports {
+			name := imp.Name
+			if name == "" {
+				name = path.Base(imp.Path)
+			}
+			have[name] = true
+		}
+		for _, name := range selectorRoots(src) {
+			if have[name] {
+				continue
+			}
+			if p, ok := resolve(name); ok && !seenPath[p] {
+				have[name], seenPath[p] = true, true
+				prevImports = append(prevImports, &Import{Path: p})
+			}
+		}
+	}
+
+	w.write("package main\n\n")
+	if len(prevImports) > 0 {
+		w.write("import (\n")
+		for _, imp := range prevImports {
+			w.write("\t" + imp.Name + " " + strconv.Quote(imp.Path) + "\n")
+		}
+		w.write(")\n\n")
+	}
+	for _, i := range imports {
+		emit(i)
+	}
+	for _, d := range prevDecls {
+		w.write(d + "\n\n")
+	}
+	for _, i := range decls {
+		emit(i)
+	}
+	w.write("\nfunc main() {\n")
+	for _, i := range stmts {
+		emit(i)
+	}
+	if cursorChunk < 0 {
+		// The cursor is on blank space: complete a new statement there.
+		res.Line = w.line
+		res.Col = cursorByteCol
+		w.write(strings.Repeat(" ", cursorByteCol) + "\n")
+	}
+	w.write("}\n")
+	res.Content = w.b.String()
+	return res
+}
+
+// selectorRoots returns identifiers used as the left side of a selector
+// ("x" in "x.y"), in order of appearance.
+func selectorRoots(src string) []string {
+	var s scanner.Scanner
+	fset := token.NewFileSet()
+	b := []byte(src)
+	s.Init(fset.AddFile("", fset.Base(), len(b)), b, nil, 0)
+	var out []string
+	seen := map[string]bool{}
+	prevIdent, prevDot := "", false
+	for {
+		_, tok, lit := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		if tok == token.PERIOD && prevIdent != "" && !prevDot && !seen[prevIdent] {
+			seen[prevIdent] = true
+			out = append(out, prevIdent)
+		}
+		prevDot = tok == token.PERIOD
+		if tok == token.IDENT && !prevDot {
+			prevIdent = lit
+		} else if tok != token.PERIOD {
+			prevIdent = ""
+		}
+	}
+	return out
+}
