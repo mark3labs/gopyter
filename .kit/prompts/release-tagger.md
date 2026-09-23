@@ -31,7 +31,7 @@ Tag a new version of gopyter following semantic versioning.
 
 6. **Calculate the new version**: increment the chosen segment and reset lower segments to 0
 
-7. **Draft the tag message**, grouped by type:
+7. **Draft the tag message**, grouped by type. (The GitHub release notes are generated separately by GoReleaser from commit subjects; the tag message is for `git show`.)
 
    ```
    v0.2.0 - gopls completion and dialog keyboard navigation
@@ -49,7 +49,8 @@ Tag a new version of gopyter following semantic versioning.
 9. **Create and push an annotated tag**:
    - `git tag -a vX.Y.Z -F /tmp/tag-msg.txt` (write the message to a file so multi-line bodies survive)
    - `git push origin vX.Y.Z`
-   - Remind the user that `go install github.com/mark3labs/gopyter@vX.Y.Z` works once the tag is pushed, and that `--version` reports it for builds made with `go install` (release builds can also set `-ldflags "-X main.version=vX.Y.Z"`)
+   - Pushing the tag triggers `.github/workflows/release.yml`: tests, then GoReleaser publishes the Linux/macOS tarballs and checksums that `install.sh` downloads. Watch it with `gh run watch` and confirm the release page lists 4 archives plus `gopyter_X.Y.Z_checksums.txt`
+   - Once published, both `curl -fsSL https://raw.githubusercontent.com/mark3labs/gopyter/master/install.sh | bash` and `go install github.com/mark3labs/gopyter@vX.Y.Z` install it
 
 ## Guidelines
 

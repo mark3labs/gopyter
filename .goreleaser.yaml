@@ -1,0 +1,66 @@
+version: 2
+
+project_name: gopyter
+
+builds:
+  - main: .
+    binary: gopyter
+    env:
+      - CGO_ENABLED=0
+    # gopyter runs cells with the user's Go toolchain and talks to the
+    # terminal through pure-Go code, so the binary cross-compiles cleanly.
+    # Windows is left out until it has been tested: the kernel's shell
+    # commands (`!cmd`) and rich-output channel have Windows fallbacks that
+    # have never run on a real machine. Windows users can `go install`.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    # main.version and main.commit feed fang's --version output.
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+
+archives:
+  # install.sh expects goreleaser's default archive name,
+  # gopyter_<version>_<os>_<arch>.tar.gz, so keep the default naming.
+  # scripts/install_test.go fails if a custom archive name is configured.
+  - formats: [tar.gz]
+    files:
+      - README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# The release body is built from Conventional Commit subjects (see
+# AGENTS.md), grouped by type.
+changelog:
+  sort: asc
+  abbrev: 7
+  filters:
+    exclude:
+      - "^chore"
+      - "^ci"
+      - "^test"
+      - "^Merge "
+  groups:
+    - title: Features
+      regexp: '^feat(\(.+\))?!?:'
+      order: 0
+    - title: Bug fixes
+      regexp: '^fix(\(.+\))?!?:'
+      order: 1
+    - title: Performance
+      regexp: '^perf(\(.+\))?!?:'
+      order: 2
+    - title: Documentation
+      regexp: '^docs(\(.+\))?!?:'
+      order: 3
+    - title: Other changes
+      order: 999
+
+release:
+  draft: false
+  prerelease: auto

@@ -1,2 +1,3 @@
 /gopyter
 *.ipynb.tmp
+dist/

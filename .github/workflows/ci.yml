@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Release binaries ship for Linux and macOS (.goreleaser.yaml), so
+        # the tests run on both.
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+
+      # The completion tests drive a real gopls and skip without one.
+      # Install it so CI actually exercises them.
+      - name: Install gopls
+        run: go install golang.org/x/tools/gopls@v0.23.0
+
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      # Includes scripts/install_test.go, which runs install.sh against a
+      # fake release and checks it agrees with .goreleaser.yaml.
+      - name: Test
+        run: go test -race ./...
+
+      # Releases are built with CGO disabled (.goreleaser.yaml). Keep that
+      # building so a C dependency can't sneak in unnoticed.
+      - name: Build with CGO disabled
+        env:
+          CGO_ENABLED: "0"
+        run: go build ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          # Must be built with a Go at least as new as the `go` line in
+          # go.mod. golangci-lint refuses to run when its own toolchain is
+          # older than the target ("the Go language version used to build
+          # golangci-lint is lower than the targeted Go version"). Raise this
+          # pin whenever the go.mod version moves.
+          version: v2.13.2
+
+  # Build every release target and archive exactly as a tag would, without
+  # publishing, so a broken .goreleaser.yaml fails here and not at release
+  # time.
+  release-dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --snapshot --clean

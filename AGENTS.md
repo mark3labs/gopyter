@@ -23,6 +23,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
 | `internal/lsp`      | minimal JSON-RPC/LSP client (stdio)                                       |
 | `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup |
+| `scripts`           | tests for `install.sh` (run against a fake release; checked against `.goreleaser.yaml`) |
 
 ## Setup and commands
 
@@ -159,7 +160,7 @@ concatenation in WriteString") count as issues to fix too.
   `build`, `chore`. Scopes are package names: `ui`, `kernel`, `complete`,
   `lsp`, `notebook`, `runner`, `cmd` (for `main.go`). For example:
   `feat(ui): add tab focus cycling to dialogs`.
-- Don't commit build artifacts. `/gopyter` is ignored; build to `/tmp`.
+- Don't commit build artifacts. `/gopyter` and `dist/` are ignored; build to `/tmp`.
 - Reusable workflows live in `.kit/prompts/` as slash commands:
   - `/commit-push`, `/create-pr`: commit and open pull requests
   - `/file-issue`, `/fix-issue`: file and resolve issues
@@ -169,6 +170,29 @@ concatenation in WriteString") count as issues to fix too.
   - `/release-tagger`: tag releases
   - `/resolve-reviews`: address review comments
   - `/new-prompt`: scaffold a new prompt
+
+## CI and releases
+
+- `.github/workflows/ci.yml` runs on pushes to `master` and on PRs:
+  - gofmt, build, vet and `go test -race` on Linux and macOS (with gopls
+    installed, so the completion tests run)
+  - a CGO-disabled build
+  - golangci-lint (pinned v2.13.2)
+  - a GoReleaser snapshot build of every release target
+- `.github/workflows/release.yml` runs on `v*` tags. It tests, then runs
+  GoReleaser, which publishes Linux and macOS (amd64/arm64) tarballs and a
+  checksum file. The release notes are generated from Conventional Commit
+  subjects.
+- `install.sh` downloads a release asset, verifies its SHA-256 and installs
+  it. Asset names, supported platforms and `.goreleaser.yaml` must agree;
+  `scripts/install_test.go` enforces this. When changing either, run
+  `go test ./scripts/`.
+- Check release config changes locally with `goreleaser check` and
+  `goreleaser release --snapshot --clean` (output goes to the ignored
+  `dist/`).
+- Tag with `git tag -a vX.Y.Z -F <msgfile>`; see `/release-tagger`. Tags are
+  GPG-signed here (`tag.gpgSign=true`), so give the message non-interactively
+  or git opens an editor.
 
 ## Security considerations
 
