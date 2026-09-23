@@ -193,8 +193,18 @@ func (k *Kernel) environ() []string {
 
 // Execute runs a cell. cellID identifies the cell (re-executing a cell
 // replaces its previous declarations), name is used in error positions.
-// Output is streamed through emit.
+// Output is streamed through emit; calls to emit are serialized.
 func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit func(Event)) error {
+	// Output arrives from several goroutines (stdout, stderr, display);
+	// serialize it so emit never needs to be safe for concurrent use.
+	var emitMu sync.Mutex
+	unsafeEmit := emit
+	emit = func(e Event) {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		unsafeEmit(e)
+	}
+
 	pc, err := parseCell(cellID, name, src)
 	if err != nil {
 		emit(Event{Kind: Error, Text: cleanErrors(err.Error(), k.Dir)})
