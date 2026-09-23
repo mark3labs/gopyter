@@ -34,6 +34,11 @@ func (m *Model) dialogButtons() []dlgButton {
 			{action{kind: actDialogConfirm}, "Save", "save", false},
 			{action{kind: actDialogCancel}, "Cancel", "cancel · esc", false},
 		}
+	case overlayReload:
+		return []dlgButton{
+			{action{kind: actReload}, "Reload", "load the file, discarding your changes · r", true},
+			{action{kind: actReloadKeep}, "Keep mine", "keep your version; saving overwrites the file · esc", false},
+		}
 	}
 	return nil
 }
@@ -126,6 +131,13 @@ func (m *Model) handleDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "q", "ctrl+c":
 			return m.dialogCancel()
 		}
+	case overlayReload:
+		switch ks {
+		case "r", "R":
+			return m.reloadConfirm()
+		case "k", "K":
+			return m.reloadKeep()
+		}
 	case overlaySaveAs:
 		// Typing while a button is focused goes back to the filename.
 		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
@@ -152,6 +164,10 @@ func (m *Model) dialogYes() tea.Cmd {
 }
 
 func (m *Model) dialogCancel() tea.Cmd {
+	if m.overlay == overlayReload {
+		// Dismissing the reload dialog keeps the local version.
+		return m.reloadKeep()
+	}
 	m.overlay = overlayNone
 	m.quitAfter = false
 	m.input.Blur()
@@ -172,6 +188,8 @@ func (m *Model) saveAsConfirm() tea.Cmd {
 	m.input.Blur()
 	if err := m.save(); err != nil {
 		m.quitAfter = false
+		// Watch the new path from its current state, not the old file's.
+		m.snapshotDisk()
 		return m.setStatus(statusError, "save failed: %v", err)
 	}
 	if m.quitAfter {

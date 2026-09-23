@@ -58,6 +58,8 @@ const (
 	actDialogNo
 	actDialogCancel
 	actDialogConfirm
+	actReload
+	actReloadKeep
 	actMenuItem       // action.cell is the item index
 	actCompletionItem // action.cell is the completion item index
 	actThemeItem      // action.cell is the theme picker entry index
@@ -673,6 +675,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.dialogCancel()
 	case actDialogConfirm:
 		return m.saveAsConfirm()
+	case actReload:
+		return m.reloadConfirm()
+	case actReloadKeep:
+		return m.reloadKeep()
 	}
 	return nil
 }

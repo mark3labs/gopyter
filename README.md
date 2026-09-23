@@ -25,6 +25,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
+- **Live reload.** Edits made to the notebook file by other programs show up automatically
 
 ## Install
 
@@ -196,6 +197,16 @@ gopyter run notes.ipynb --fail-fast
 ```
 
 It exits non-zero if any cell fails, so it works as a CI check for notebooks.
+
+## Editing outside gopyter
+
+gopyter checks the notebook file once a second. If another program changes it,
+for example an editor or `gopyter run --save`, gopyter reloads it and keeps
+your place. If you have unsaved changes, or the cell you're editing changed,
+it asks first. **Reload** loads the file and discards your changes. **Keep
+mine** (or `esc`) keeps your version, and the next save overwrites the file.
+Reloading doesn't reset the kernel, so declarations from cells you already ran
+stay in effect. External edits to cell text can be undone.
 
 ## Development
 

@@ -38,6 +38,7 @@ const (
 	overlaySaveAs
 	overlayMenu
 	overlayTheme
+	overlayReload
 )
 
 type statusKind int
@@ -112,6 +113,7 @@ type Model struct {
 	contentLines  int
 
 	dirty   bool
+	watch   watchState
 	counter int
 	queue   []string
 	running *runState
@@ -198,6 +200,7 @@ func New(opts Options) *Model {
 		name = DefaultTheme
 	}
 	m.applyTheme(name)
+	m.snapshotDisk()
 
 	// Start in edit mode on a fresh, empty notebook.
 	if len(m.cells) == 1 && m.cells[0].ed.Value() == "" {
@@ -208,7 +211,7 @@ func New(opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.RequestWindowSize
+	return tea.Batch(tea.RequestWindowSize, watchTick())
 }
 
 func (m *Model) cur() *Cell { return m.cells[m.sel] }
@@ -264,6 +267,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runEventsMsg:
 		return m, m.handleRunEvents(msg)
+
+	case watchTickMsg:
+		return m, m.handleWatchTick()
+
+	case diskPollMsg:
+		return m, m.handleDiskPoll(msg)
 
 	case tea.PasteMsg:
 		if m.overlay == overlaySaveAs {
@@ -336,7 +345,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.overlay = overlayNone
 		}
 		return nil
-	case overlayQuit, overlaySaveAs:
+	case overlayQuit, overlaySaveAs, overlayReload:
 		return m.handleDialogKey(msg)
 	case overlayTheme:
 		return m.handleThemeKey(msg)
@@ -916,6 +925,7 @@ func (m *Model) save() error {
 		return err
 	}
 	m.dirty = false
+	m.snapshotDisk()
 	return nil
 }
 

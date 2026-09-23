@@ -804,6 +804,18 @@ func (m *Model) renderOverlay() (string, []zone) {
 			t.text.Render("Save " + m.displayName() + " before quitting?"),
 		})
 
+	case overlayReload:
+		// Without unsaved changes, the prompt is about the cell being edited.
+		lost := "your unsaved changes"
+		if !m.dirty {
+			lost = "the cell you are editing"
+		}
+		return dialog(colWarning, []string{
+			title("File changed on disk"), "",
+			t.text.Render(m.displayName() + " was changed outside gopyter."),
+			t.text.Render("Reload it and replace " + lost + "?"),
+		})
+
 	case overlaySaveAs:
 		return dialog(colPrimary, []string{
 			title("Save notebook as"), "",

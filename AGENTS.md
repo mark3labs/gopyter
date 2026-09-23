@@ -123,6 +123,11 @@ concatenation in WriteString") count as issues to fix too.
   rebuilds everything derived from it (styles, highlighter, glamour style,
   help/input styles, cached cell renders). Anything new that caches styled
   output must be invalidated there too.
+- External edits (`watch.go`): a 1s tick polls the file (stat, then
+  SHA-256 on change) off the UI goroutine. `save()` re-snapshots it and bumps
+  `watch.gen` so our own writes and stale polls are ignored. Reloads wait
+  while cells run or an overlay is open. `applyReload` reuses cells matched by
+  ID (or by position and source for ID-less files), keeping undo and caches.
 - Completion (`completion.go`) is debounced, and responses are matched by
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.

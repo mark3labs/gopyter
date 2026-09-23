@@ -78,16 +78,22 @@ func fromNotebook(c *notebook.Cell) *Cell {
 	cell := &Cell{
 		id: c.ID, kind: c.Type, ed: NewEditor(langFor(c.Type), c.Source),
 		outputs: c.Outputs, count: c.ExecutionCount, metadata: c.Metadata,
-	}
-	if c.ExecutionCount > 0 {
-		cell.status = statusOK
-		for _, o := range c.Outputs {
-			if o.Kind == notebook.Error {
-				cell.status = statusFailed
-			}
-		}
+		status: diskStatus(c),
 	}
 	return cell
+}
+
+// diskStatus derives a cell's run status from its saved outputs.
+func diskStatus(c *notebook.Cell) cellStatus {
+	if c.ExecutionCount == 0 {
+		return statusIdle
+	}
+	for _, o := range c.Outputs {
+		if o.Kind == notebook.Error {
+			return statusFailed
+		}
+	}
+	return statusOK
 }
 
 func (c *Cell) toNotebook() *notebook.Cell {
