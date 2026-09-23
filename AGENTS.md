@@ -149,12 +149,26 @@ concatenation in WriteString") count as issues to fix too.
 
 ## Pull requests and commits
 
+- The default branch is `master`.
 - Keep changes focused. Update `README.md` when user-visible behavior, keys or
   flags change, and update the in-app help (`fullHelp` in `keys.go`) when
   adding shortcuts.
-- Write commit messages in the imperative mood with a short subject line
-  (for example "Add tab focus cycling to dialogs").
+- Use [Conventional Commits](https://www.conventionalcommits.org/):
+  `<type>(<scope>): <summary>`, in the imperative mood, lowercase, at most 72
+  characters. Types: `feat`, `fix`, `refactor`, `perf`, `test`, `docs`,
+  `build`, `chore`. Scopes are package names: `ui`, `kernel`, `complete`,
+  `lsp`, `notebook`, `runner`, `cmd` (for `main.go`). For example:
+  `feat(ui): add tab focus cycling to dialogs`.
 - Don't commit build artifacts. `/gopyter` is ignored; build to `/tmp`.
+- Reusable workflows live in `.kit/prompts/` as slash commands:
+  - `/commit-push`, `/create-pr`: commit and open pull requests
+  - `/file-issue`, `/fix-issue`: file and resolve issues
+  - `/tui-check`: visual verification
+  - `/code-audit`: read-only audit
+  - `/update-docs`: documentation updates
+  - `/release-tagger`: tag releases
+  - `/resolve-reviews`: address review comments
+  - `/new-prompt`: scaffold a new prompt
 
 ## Security considerations
 
