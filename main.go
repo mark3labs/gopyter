@@ -19,8 +19,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// version and commit can be set at build time with -ldflags "-X
+// main.version=... -X main.commit=...". When empty, fang reports the module
+// version from the build info (e.g. for go install ...@vX.Y.Z).
 var (
-	version = "dev"
+	version = ""
 	commit  = ""
 )
 
