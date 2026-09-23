@@ -1,0 +1,4 @@
+mcpServers:
+  lightpanda:
+    type: local
+    command: ["lightpanda", "mcp"]
