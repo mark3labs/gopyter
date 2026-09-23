@@ -21,6 +21,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 
 - **Real Go, cell by cell.** Declarations persist across cells, the last expression is displayed, and compile errors point at cell lines
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
+- **Symbol info.** `alt+k` (or `K` in vim) shows the signature and docs of the function, type or variable under the cursor
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
@@ -41,7 +42,7 @@ go install github.com/mark3labs/gopyter@latest
 ```
 
 **Requirements:** the [Go toolchain](https://go.dev/dl/) on your `PATH`, since
-cells are compiled with it. For completion, install
+cells are compiled with it. For completion and symbol info, install
 `go install golang.org/x/tools/gopls@latest` (without it, gopyter falls back to
 basic completion).
 
@@ -129,6 +130,9 @@ mode** (green) edits text. Press `?` for the full list.
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
 copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
+`alt+k` (or `F1`) shows the signature and documentation of the symbol under the
+cursor, or of the enclosing call when the cursor is among its arguments;
+`pgup`/`pgdn` scroll it and any other key dismisses it.
 `shift+enter` and `ctrl+enter` need a terminal with the kitty keyboard protocol
 (kitty, Ghostty, WezTerm, foot…); `ctrl+r` and `ctrl+j` work everywhere.
 
@@ -152,6 +156,7 @@ in INSERT.
 | `p` `P`                                | put after / before                       |
 | `v` `V`, then `d` `c` `y` `o`          | visual and visual-line mode              |
 | `u` / `ctrl+r`                         | undo / redo                              |
+| `K`                                    | symbol info (signature and docs)         |
 
 Yanks also go to the system clipboard, and a mouse selection turns into a
 visual selection. Since `ctrl+r` is redo in NORMAL mode, run cells from there

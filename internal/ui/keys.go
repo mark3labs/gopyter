@@ -43,6 +43,7 @@ type keyMap struct {
 	Escape key.Binding
 	Undo   key.Binding
 	Redo   key.Binding
+	Info   key.Binding
 }
 
 func newKeyMap() keyMap {
@@ -86,6 +87,7 @@ func newKeyMap() keyMap {
 		Escape: b([]string{"esc"}, "esc", "command mode"),
 		Undo:   b([]string{"ctrl+z"}, "^z", "undo"),
 		Redo:   b([]string{"ctrl+y", "ctrl+shift+z"}, "^y", "redo"),
+		Info:   b([]string{"alt+k", "f1"}, "alt+k/F1", "symbol info"),
 	}
 }
 
@@ -145,6 +147,7 @@ func (k keyMap) fullHelp(vim bool) []helpSection {
 			hint("p P", "put"),
 			hint("u ^r", "undo / redo"),
 			hint("w b $ G", "motions, 3w"),
+			hint("K", "symbol info"),
 		}})
 	}
 	return secs
@@ -165,6 +168,7 @@ func (k keyMap) baseHelp() []helpSection {
 			key.NewBinding(key.WithKeys("tab"), key.WithHelp("⇥/⇧⇥", "indent/dedent")),
 			key.NewBinding(key.WithKeys("ctrl+t"), key.WithHelp("^t", "code ⇄ markdown")),
 			key.NewBinding(key.WithKeys("ctrl+space"), key.WithHelp("⇥/^␣", "complete")),
+			k.Info,
 		}},
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,6 +84,10 @@ type Engine struct {
 	ready    chan struct{}
 	startErr error
 
+	// syncMu orders document updates, which completion and hover
+	// requests send concurrently, so gopls sees increasing versions.
+	syncMu sync.Mutex
+
 	stdOnce sync.Once
 	std     map[string]string // unambiguous package name -> import path
 }
@@ -131,6 +136,8 @@ var goplsSettings = map[string]any{
 	"staticcheck":             false,
 	"analyses":                map[string]bool{"unusedvariable": false},
 	"completionBudget":        "200ms",
+	// pkg.go.dev links are noise in a terminal popup.
+	"linksInHover": false,
 }
 
 // New creates an engine and starts gopls in the background.
@@ -193,6 +200,12 @@ func (e *Engine) start() error {
 						"documentationFormat": []string{"plaintext"},
 					},
 					"contextSupport": true,
+				},
+				"hover": map[string]any{"contentFormat": []string{"markdown", "plaintext"}},
+				"signatureHelp": map[string]any{
+					"signatureInformation": map[string]any{
+						"documentationFormat": []string{"markdown", "plaintext"},
+					},
 				},
 			},
 			"general": map[string]any{"positionEncodings": []string{"utf-16"}},
@@ -271,6 +284,130 @@ func (e *Engine) Complete(ctx context.Context, req Request) (Result, error) {
 	return res, nil
 }
 
+// Hover returns documentation for the symbol at the cursor as markdown,
+// or the signature of the enclosing call when the cursor isn't on a
+// symbol. It returns "" when there is nothing to show, and an error when
+// gopls isn't available.
+func (e *Engine) Hover(ctx context.Context, req Request) (string, error) {
+	select {
+	case <-e.ready:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if e.startErr != nil {
+		return "", e.startErr
+	}
+	e.mu.Lock()
+	client := e.client
+	e.mu.Unlock()
+	if client == nil {
+		return "", errors.New("gopls is not running")
+	}
+	select {
+	case <-client.Done():
+		return "", errors.New("gopls exited")
+	default:
+	}
+
+	src, err := e.sync(client, req)
+	if err != nil {
+		return "", err
+	}
+	line := strings.Split(src.Content, "\n")[src.Line]
+	at := func(col int) position { return position{Line: src.Line, Character: utf16Len(line[:col])} }
+
+	// Hover the identifier under the cursor, or the one just before it
+	// (where the cursor is after typing one, or on the "(" of a call).
+	// Elsewhere, e.g. among call arguments, the enclosing call's signature
+	// is more useful than hovering punctuation.
+	var cols []int
+	if r, _ := utf8.DecodeRuneInString(line[src.Col:]); isIdent(r) {
+		cols = append(cols, src.Col)
+	}
+	if r, n := utf8.DecodeLastRuneInString(line[:src.Col]); n > 0 && isIdent(r) {
+		cols = append(cols, src.Col-n)
+	}
+	for _, col := range cols {
+		var res struct{ Contents json.RawMessage }
+		err := client.Call(ctx, "textDocument/hover", map[string]any{
+			"textDocument": map[string]string{"uri": e.uri},
+			"position":     at(col),
+		}, &res)
+		if err != nil {
+			return "", err
+		}
+		if doc := strings.TrimSpace(hoverString(res.Contents)); doc != "" {
+			return cleanHover(doc), nil
+		}
+	}
+
+	var sig struct {
+		Signatures []struct {
+			Label         string          `json:"label"`
+			Documentation json.RawMessage `json:"documentation"`
+		} `json:"signatures"`
+		ActiveSignature int `json:"activeSignature"`
+	}
+	err = client.Call(ctx, "textDocument/signatureHelp", map[string]any{
+		"textDocument": map[string]string{"uri": e.uri},
+		"position":     at(src.Col),
+	}, &sig)
+	if err != nil || len(sig.Signatures) == 0 {
+		return "", err
+	}
+	s := sig.Signatures[min(max(sig.ActiveSignature, 0), len(sig.Signatures)-1)]
+	var b strings.Builder
+	b.WriteString("```go\nfunc ")
+	b.WriteString(s.Label)
+	b.WriteString("\n```")
+	if d := strings.TrimSpace(docString(s.Documentation)); d != "" {
+		b.WriteString("\n\n")
+		b.WriteString(d)
+	}
+	return cleanHover(b.String()), nil
+}
+
+var (
+	// mdLink matches markdown links.
+	mdLink = regexp.MustCompile(`\[([^\]]*)\]\(([^)]*)\)`)
+	// mdRule matches thematic breaks, which gopls puts between the
+	// signature and the documentation.
+	mdRule = regexp.MustCompile(`(?m)^---+\n\n?`)
+)
+
+// cleanHover simplifies gopls markdown for a terminal: it drops rules and
+// links to local files, and shows links titled with their own URL once.
+func cleanHover(s string) string {
+	s = mdRule.ReplaceAllString(s, "")
+	s = mdLink.ReplaceAllStringFunc(s, func(l string) string {
+		m := mdLink.FindStringSubmatch(l)
+		if strings.HasPrefix(m[2], "file:") || m[1] == m[2] {
+			return m[1]
+		}
+		return l
+	})
+	return strings.TrimSpace(s)
+}
+
+// hoverString extracts the text of hover contents, which may be
+// MarkupContent, a MarkedString or a list of MarkedStrings.
+func hoverString(raw json.RawMessage) string {
+	if len(raw) > 0 && raw[0] == '[' {
+		var list []json.RawMessage
+		_ = json.Unmarshal(raw, &list) // malformed contents just show nothing
+		parts := make([]string, 0, len(list))
+		for _, r := range list {
+			parts = append(parts, hoverString(r))
+		}
+		return strings.Join(parts, "\n\n")
+	}
+	var ms struct{ Language, Value string }
+	if json.Unmarshal(raw, &ms) == nil && ms.Language != "" {
+		return "```" + ms.Language + "\n" + ms.Value + "\n```"
+	}
+	return docString(raw)
+}
+
 type position struct {
 	Line      int `json:"line"`
 	Character int `json:"character"`
@@ -293,16 +430,17 @@ type lspItem struct {
 	TextEdit      *textEdit       `json:"textEdit"`
 }
 
-func (e *Engine) gopls(ctx context.Context, client *lsp.Client, req Request) (Result, error) {
+// sync mirrors the cell into the gopls workspace file, returning the
+// generated source with the cursor position mapped into it.
+func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource, error) {
 	std := e.stdPackages()
 	src := e.k.CompletionSource(req.CellID, req.Src, req.Row, req.Col, func(name string) (string, bool) {
 		p, ok := std[name]
 		return p, ok
 	})
-	lines := strings.Split(src.Content, "\n")
-	cursorLine := lines[src.Line]
-	char := utf16Len(cursorLine[:src.Col])
 
+	e.syncMu.Lock()
+	defer e.syncMu.Unlock()
 	e.mu.Lock()
 	e.version++
 	version := e.version
@@ -334,9 +472,17 @@ func (e *Engine) gopls(ctx context.Context, client *lsp.Client, req Request) (Re
 			"contentChanges": []any{map[string]string{"text": src.Content}},
 		})
 	}
+	return src, err
+}
+
+func (e *Engine) gopls(ctx context.Context, client *lsp.Client, req Request) (Result, error) {
+	src, err := e.sync(client, req)
 	if err != nil {
 		return Result{}, err
 	}
+	lines := strings.Split(src.Content, "\n")
+	cursorLine := lines[src.Line]
+	char := utf16Len(cursorLine[:src.Col])
 
 	trigger := map[string]any{"triggerKind": 1}
 	if req.Trigger != 0 {

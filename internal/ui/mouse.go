@@ -243,6 +243,11 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	}
 	m.pendingKey = ""
 
+	if m.infoVisible() && image.Pt(ms.X, ms.Y).In(m.info.rect) {
+		return nil // clicks on the popup don't reach the cells beneath
+	}
+	m.closeInfo()
+
 	if m.comp.open {
 		if z, ok := m.zoneAt(ms.X, ms.Y); ok && z.act.kind == actCompletionItem && ms.Button == tea.MouseLeft {
 			return m.acceptCompletion(z.act.cell)
@@ -373,6 +378,16 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 	if m.overlay != overlayNone {
 		return nil
 	}
+	if m.infoVisible() && image.Pt(ms.X, ms.Y).In(m.info.rect) {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.scrollInfo(-1)
+		case tea.MouseWheelDown:
+			m.scrollInfo(1)
+		}
+		return nil
+	}
+	m.closeInfo()
 	if m.comp.open {
 		if image.Pt(ms.X, ms.Y).In(m.comp.rect) {
 			switch ms.Button {

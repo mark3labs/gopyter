@@ -99,6 +99,7 @@ type Model struct {
 
 	completer Completer
 	comp      completionState
+	info      infoState
 	vim       vimState
 	path      string
 	meta      map[string]any
@@ -129,6 +130,9 @@ type Model struct {
 	md       *glamour.TermRenderer
 	mdStyle  ansi.StyleConfig
 	mdWidth  int
+	// infoMD renders the symbol info popup at infoMDWidth.
+	infoMD      *glamour.TermRenderer
+	infoMDWidth int
 
 	status     string
 	statusKind statusKind
@@ -248,7 +252,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.busy() && !m.comp.loading {
+		if !m.busy() && !m.comp.loading && !m.info.loading {
 			m.spinning = false
 			return m, nil
 		}
@@ -264,6 +268,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case completionResultMsg:
 		return m, m.handleCompletionResult(msg)
+
+	case infoResultMsg:
+		return m, m.handleInfoResult(msg)
 
 	case runEventsMsg:
 		return m, m.handleRunEvents(msg)
@@ -353,6 +360,14 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	m.follow = true
 	k := m.keys
+
+	// The symbol info popup closes on any key; some are its own.
+	if m.infoKey(msg) {
+		return nil
+	}
+	if m.isInfoKey(msg) && m.cur().kind == notebook.Code {
+		return m.requestInfo()
+	}
 
 	// The completion popup gets first pick of keys while it's open.
 	if m.mode == modeEdit && m.vimInsertMode() {
@@ -571,6 +586,7 @@ func (m *Model) moveCursor(motion string, crossCells bool) {
 // leaveEdit switches to command mode.
 func (m *Model) leaveEdit() {
 	m.closeCompletion()
+	m.closeInfo()
 	if m.mode == modeEdit {
 		ed := m.cur().ed
 		ed.ClearSelection()

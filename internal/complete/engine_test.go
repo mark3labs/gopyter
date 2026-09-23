@@ -122,3 +122,77 @@ func TestBasic(t *testing.T) {
 		t.Fatalf("replace = %d", res.Replace)
 	}
 }
+
+func hover(t *testing.T, e *Engine, id, src string) string {
+	t.Helper()
+	// The cursor goes where "|" is.
+	i := strings.Index(src, "|")
+	src = src[:i] + src[i+1:]
+	before := src[:i]
+	row := strings.Count(before, "\n")
+	col := len([]rune(before[strings.LastIndex(before, "\n")+1:]))
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	md, err := e.Hover(ctx, Request{CellID: id, Src: src, Row: row, Col: col})
+	if err != nil {
+		t.Fatalf("hover %q: %v", src, err)
+	}
+	return md
+}
+
+func TestHover(t *testing.T) {
+	if _, err := exec.LookPath("gopls"); err != nil {
+		t.Skip("gopls not installed")
+	}
+	k, err := kernel.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k.Close() })
+	e := New(k)
+	t.Cleanup(func() { _ = e.Close() })
+
+	// A standard library function, without an explicit import, with the
+	// cursor inside the name and just past it.
+	for _, src := range []string{`x := strings.Sp|lit("a,b", ",")`, `x := strings.Split|`} {
+		md := hover(t, e, "a", src)
+		if !strings.Contains(md, "func strings.Split(s string, sep string) []string") || !strings.Contains(md, "Split slices s") {
+			t.Fatalf("hover %q:\n%s", src, md)
+		}
+		// Rules and links to local source files are cleaned up.
+		if strings.Contains(md, "---") || strings.Contains(md, "file://") {
+			t.Fatalf("hover %q not cleaned:\n%s", src, md)
+		}
+	}
+
+	// A struct persisted from an executed cell shows its fields.
+	err = k.Execute(context.Background(), "decl", "In[1]",
+		"type Point struct{ X, Y float64 }", func(kernel.Event) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md := hover(t, e, "b", "p := Poi|nt{1, 2}"); !strings.Contains(md, "type Point struct") ||
+		!strings.Contains(md, "X, Y float64") {
+		t.Fatalf("struct hover:\n%s", md)
+	}
+
+	// Among call arguments, the enclosing call's signature.
+	if md := hover(t, e, "b", `x := strings.Split("a", |)`); !strings.Contains(md, "Split(s string, sep string) []string") {
+		t.Fatalf("signature help:\n%s", md)
+	}
+
+	// Nothing to show on a literal or blank space.
+	for _, src := range []string{"x := 1|", "|"} {
+		if md := hover(t, e, "b", src); md != "" {
+			t.Fatalf("hover %q: want nothing, got\n%s", src, md)
+		}
+	}
+}
+
+func TestCleanHover(t *testing.T) {
+	in := "```go\nfunc F()\n```\n\n---\n\nSee [G](file:///x/y.go#1,2), [https://go.dev](https://go.dev) and [docs](https://pkg.go.dev)."
+	want := "```go\nfunc F()\n```\n\nSee G, https://go.dev and [docs](https://pkg.go.dev)."
+	if got := cleanHover(in); got != want {
+		t.Fatalf("got\n%q\nwant\n%q", got, want)
+	}
+}

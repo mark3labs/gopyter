@@ -52,7 +52,16 @@ func (m *Model) View() tea.View {
 func (m *Model) renderScreen() (string, *tea.Cursor) {
 	m.zones = m.zones[:0]
 	body, cursor := m.renderBody()
+	// The info popup is laid out first: the footer hints depend on it.
+	var info string
+	var ix, iy int
+	if m.infoVisible() && cursor != nil {
+		info, ix, iy = m.renderInfo(cursor.X, cursor.Y)
+	}
 	screen := strings.Join([]string{m.renderHeader(), body, m.renderFooter()}, "\n")
+	if info != "" {
+		screen = m.composite(screen, info, ix, iy, false)
+	}
 
 	if m.comp.open && m.overlay == overlayNone && m.mode == modeEdit && cursor != nil {
 		layer, x, y, zones := m.renderCompletion(cursor.X, cursor.Y)
@@ -239,6 +248,11 @@ func (m *Model) renderFooter() string {
 			st, icon = t.statusErr, "✗"
 		}
 		mid = st.Render(icon + " " + m.status)
+	} else if m.infoVisible() && !m.info.loading {
+		mid = t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+		if len(m.info.lines) > m.info.rows {
+			mid = t.helpKey.Render("pgup/pgdn") + t.helpDesc.Render(" scroll · ") + mid
+		}
 	} else if m.comp.open && len(m.comp.items) > 0 {
 		mid = t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
