@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/signal"
@@ -11,7 +12,9 @@ import (
 	"syscall"
 
 	"charm.land/fang/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/mark3labs/gopyter/internal/complete"
+	"github.com/mark3labs/gopyter/internal/config"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/runner"
@@ -42,6 +45,7 @@ func rootCmd() *cobra.Command {
 	var (
 		workdir    string
 		theme      string
+		syntax     string
 		noComplete bool
 		vim        bool
 	)
@@ -70,7 +74,17 @@ func rootCmd() *cobra.Command {
 				return err
 			}
 			defer closeKernel(k)
-			opts := ui.Options{Path: path, Notebook: nb, Kernel: k, SyntaxTheme: theme, Vim: vim}
+			name, err := resolveTheme(cmd, theme)
+			if err != nil {
+				return err
+			}
+			opts := ui.Options{
+				Path: path, Notebook: nb, Kernel: k, Vim: vim,
+				Theme: name, SyntaxTheme: syntax, SaveTheme: saveTheme,
+				// Probe before the TUI takes over the terminal, so the
+				// query can't race the program's input reader.
+				LightBackground: !lipgloss.HasDarkBackground(os.Stdin, os.Stdout),
+			}
 			if !noComplete {
 				engine := complete.New(k)
 				defer func() { _ = engine.Close() }()
@@ -80,11 +94,12 @@ func rootCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().StringVar(&workdir, "workdir", "", "persistent kernel workspace (Go module) directory; a temporary one is used by default")
-	cmd.Flags().StringVar(&theme, "syntax-theme", "catppuccin-mocha", "chroma syntax highlighting theme")
+	cmd.Flags().StringVar(&theme, "theme", "", "color theme for this session (see 'gopyter themes'); the saved theme is used by default")
+	cmd.Flags().StringVar(&syntax, "syntax-theme", "", "chroma syntax highlighting style, overriding the theme's")
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode")
 
-	cmd.AddCommand(runCmd(&workdir))
+	cmd.AddCommand(runCmd(&workdir), themesCmd())
 	return cmd
 }
 
@@ -125,6 +140,70 @@ func runCmd(workdir *string) *cobra.Command {
 	cmd.Flags().BoolVar(&save, "save", false, "write the outputs back into the notebook")
 	cmd.Flags().BoolVar(&failFast, "fail-fast", false, "stop at the first failing cell")
 	return cmd
+}
+
+// resolveTheme picks the UI theme: the --theme flag, else the saved one,
+// else the default. A bad flag is an error; a bad saved value only a warning,
+// so a stale config never prevents gopyter from starting.
+func resolveTheme(cmd *cobra.Command, flag string) (string, error) {
+	if flag != "" {
+		if !ui.ValidTheme(flag) {
+			return "", fmt.Errorf("unknown theme %q (available: %s)", flag, strings.Join(ui.ThemeNames(), ", "))
+		}
+		return flag, nil
+	}
+	s, err := config.Load()
+	if err != nil {
+		cmd.PrintErrf("gopyter: reading settings: %v\n", err)
+		return ui.DefaultTheme, nil
+	}
+	if s.Theme == "" {
+		return ui.DefaultTheme, nil
+	}
+	if !ui.ValidTheme(s.Theme) {
+		cmd.PrintErrf("gopyter: unknown saved theme %q, using %s\n", s.Theme, ui.DefaultTheme)
+		return ui.DefaultTheme, nil
+	}
+	return s.Theme, nil
+}
+
+// saveTheme persists the theme picked in the UI.
+func saveTheme(name string) error {
+	return config.Update(func(s *config.Settings) { s.Theme = name })
+}
+
+func themesCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "themes",
+		Short: "List the available color themes",
+		Long: "List the available color themes. The active one is marked with *.\n\n" +
+			"Pick a theme inside gopyter with T (or the ◐ theme button); the choice is\n" +
+			"saved to the user config directory. --theme overrides it for one session.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			current, err := resolveTheme(cmd, "")
+			if err != nil {
+				return err
+			}
+			var b strings.Builder
+			for _, n := range ui.ThemeNames() {
+				mark := "  "
+				if n == current {
+					mark = "* "
+				}
+				b.WriteString(mark)
+				b.WriteString(n)
+				b.WriteByte('\n')
+			}
+			if p, err := config.Path(); err == nil {
+				b.WriteString("\nsettings: ")
+				b.WriteString(p)
+				b.WriteByte('\n')
+			}
+			_, err = io.WriteString(cmd.OutOrStdout(), b.String())
+			return err
+		},
+	}
 }
 
 // closeKernel removes the kernel workspace, reporting (but not failing on)

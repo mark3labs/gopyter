@@ -17,7 +17,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
-	"charm.land/lipgloss/v2"
+	"charm.land/glamour/v2/ansi"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
@@ -37,6 +37,7 @@ const (
 	overlayQuit
 	overlaySaveAs
 	overlayMenu
+	overlayTheme
 )
 
 type statusKind int
@@ -73,8 +74,16 @@ type Options struct {
 	Path     string
 	Notebook *notebook.Notebook
 	Kernel   *kernel.Kernel
-	// SyntaxTheme is a chroma style name.
+	// Theme is the UI color theme (see ThemeNames); empty means
+	// DefaultTheme.
+	Theme string
+	// SyntaxTheme is a chroma style name overriding the theme's syntax
+	// highlighting; empty follows the theme.
 	SyntaxTheme string
+	// LightBackground selects the light variant of the theme.
+	LightBackground bool
+	// SaveTheme persists a theme picked in the UI (optional).
+	SaveTheme func(name string) error
 	// Completer provides code completion (optional).
 	Completer Completer
 	// Vim enables vim key bindings in edit mode.
@@ -112,7 +121,9 @@ type Model struct {
 	keys     keyMap
 	hl       *highlighter
 	theme    theme
+	themes   themeState
 	md       *glamour.TermRenderer
+	mdStyle  ansi.StyleConfig
 	mdWidth  int
 
 	status     string
@@ -155,14 +166,13 @@ func New(opts Options) *Model {
 	if nb == nil {
 		nb = notebook.New()
 	}
-	if opts.SyntaxTheme == "" {
-		opts.SyntaxTheme = "catppuccin-mocha"
-	}
 	m := &Model{
 		k: opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
-		keys: newKeyMap(), hl: newHighlighter(opts.SyntaxTheme), theme: newTheme(),
-		follow: true, hoverCell: -1,
+		keys: newKeyMap(), follow: true, hoverCell: -1,
 	}
+	m.themes.dark = !opts.LightBackground
+	m.themes.syntax = opts.SyntaxTheme
+	m.themes.save = opts.SaveTheme
 	m.vim.enabled = opts.Vim
 	for _, c := range nb.Cells {
 		m.cells = append(m.cells, fromNotebook(c))
@@ -171,29 +181,20 @@ func New(opts Options) *Model {
 	if len(m.cells) == 0 {
 		m.cells = []*Cell{newCell(notebook.Code, "")}
 	}
-	m.spinner = spinner.New(
-		spinner.WithSpinner(spinner.MiniDot),
-		spinner.WithStyle(lipgloss.NewStyle().Foreground(colYellow)),
-	)
+	m.spinner = spinner.New(spinner.WithSpinner(spinner.MiniDot))
 	m.help = help.New()
-	m.help.Styles.ShortKey = m.theme.helpKey
-	m.help.Styles.ShortDesc = m.theme.helpDesc
-	m.help.Styles.ShortSeparator = m.theme.helpSep
-	m.help.Styles.Ellipsis = m.theme.helpSep
 	m.help.ShortSeparator = " · "
 
 	m.input = textinput.New()
 	m.input.Prompt = "❯ "
 	m.input.Placeholder = "notebook.ipynb"
-	st := m.input.Styles()
-	st.Focused.Prompt = lipgloss.NewStyle().Foreground(colGopher).Bold(true)
-	st.Focused.Text = lipgloss.NewStyle().Foreground(colText)
-	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(colSubtle)
-	st.Blurred.Prompt = lipgloss.NewStyle().Foreground(colMuted)
-	st.Blurred.Text = lipgloss.NewStyle().Foreground(colDim)
-	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(colSubtle)
-	m.input.SetStyles(st)
 	m.input.SetWidth(40)
+
+	name := opts.Theme
+	if !ValidTheme(name) {
+		name = DefaultTheme
+	}
+	m.applyTheme(name)
 
 	// Start in edit mode on a fresh, empty notebook.
 	if len(m.cells) == 1 && m.cells[0].ed.Value() == "" {
@@ -334,6 +335,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return nil
 	case overlayQuit, overlaySaveAs:
 		return m.handleDialogKey(msg)
+	case overlayTheme:
+		return m.handleThemeKey(msg)
 	}
 
 	m.follow = true
@@ -660,6 +663,8 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.restart()
 	case key.Matches(msg, k.Help):
 		m.overlay = overlayHelp
+	case key.Matches(msg, k.Theme):
+		return m.openThemePicker()
 	case key.Matches(msg, k.Quit):
 		return m.requestQuit()
 	case msg.String() == "esc":

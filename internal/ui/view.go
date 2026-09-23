@@ -92,7 +92,7 @@ func (m *Model) renderHeader() string {
 	t := m.theme
 	logoText := " ◆ gopyter "
 	runes := []rune(logoText)
-	colors := lipgloss.Blend1D(len(runes), colGopher, colPurple)
+	colors := lipgloss.Blend1D(len(runes), colPrimary, colAccent)
 	var logo strings.Builder
 	for i, r := range runes {
 		logo.WriteString(lipgloss.NewStyle().Background(colors[i]).Foreground(colInk).Bold(true).Render(string(r)))
@@ -103,7 +103,7 @@ func (m *Model) renderHeader() string {
 		name = t.muted.Italic(true).Render(m.displayName())
 	}
 	if m.dirty {
-		name += lipgloss.NewStyle().Foreground(colYellow).Render(" ●")
+		name += lipgloss.NewStyle().Foreground(colWarning).Render(" ●")
 	}
 	left := logo.String() + "  " + name
 
@@ -157,6 +157,7 @@ func (m *Model) renderToolbar() string {
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
 		{act: action{kind: actSave}, full: "save", short: "save", tip: "save the notebook · ctrl+s", enabled: true},
+		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: "change the color theme · T", enabled: true},
 		{act: action{kind: actHelp}, full: "? help", short: "?", tip: "keyboard shortcuts · ?", enabled: true},
 	}
 	build := func(short bool) *lineBuilder {
@@ -243,7 +244,7 @@ func (m *Model) renderFooter() string {
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
 			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
 	} else if m.hoverTip != "" {
-		mid = lipgloss.NewStyle().Foreground(colSky).Render("› " + m.hoverTip)
+		mid = lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip)
 	} else if m.pendingKey != "" {
 		mid = t.dim.Render(m.pendingKey + "…")
 	} else if p := m.vim.pending(); p != "" && m.vimActive() {
@@ -367,7 +368,7 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 				if m.vimActive() {
 					cursor.Shape = tea.CursorBlock
 				}
-				cursor.Color = colGreen
+				cursor.Color = colSuccess
 			}
 		}
 	}
@@ -376,7 +377,7 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 
 func (m *Model) markdownRenderer(width int) *glamour.TermRenderer {
 	if m.md == nil || m.mdWidth != width {
-		r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(width))
+		r, err := glamour.NewTermRenderer(glamour.WithStyles(m.mdStyle), glamour.WithWordWrap(width))
 		if err != nil {
 			return nil
 		}
@@ -479,7 +480,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 		case m.hovered(labelAct) && m.hoverCell == i && isRunning:
 			label = lipgloss.NewStyle().Foreground(colOrange).Bold(true).Render("[■]")
 		case m.hovered(labelAct) && m.hoverCell == i:
-			label = lipgloss.NewStyle().Foreground(colGreen).Bold(true).Render("[▶]")
+			label = lipgloss.NewStyle().Foreground(colSuccess).Bold(true).Render("[▶]")
 		case c.status == statusRunning:
 			label = t.statusRun.Render("[") + m.spinner.View() + t.statusRun.Render("]")
 		case c.status == statusQueued:
@@ -503,7 +504,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 	case m.hovered(convAct):
 		title = t.btnHover.Render(" " + langTitle(c.kind) + " → " + convTo + " ")
 	case editing:
-		title = " " + lipgloss.NewStyle().Foreground(colGreen).Render(langTitle(c.kind)) + " "
+		title = " " + lipgloss.NewStyle().Foreground(colSuccess).Render(langTitle(c.kind)) + " "
 	}
 	// boxTop places the title right after "╭─".
 	titleX := gutterWidth + 2
@@ -731,10 +732,10 @@ func (m *Model) renderOverlay() (string, []zone) {
 	t := m.theme
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colGopher).
+		BorderForeground(colPrimary).
 		Padding(dlgPadY, dlgPadX)
 	title := func(s string) string {
-		return lipgloss.NewStyle().Foreground(colGopher).Bold(true).Render(s)
+		return lipgloss.NewStyle().Foreground(colPrimary).Bold(true).Render(s)
 	}
 	// dialog lays out rows and a final row of buttons.
 	// dialog lays out rows, a row with the dialog's buttons, and a hint.
@@ -772,7 +773,7 @@ func (m *Model) renderOverlay() (string, []zone) {
 		var grid string
 		for _, sec := range m.keys.fullHelp(m.vim.enabled) {
 			var rows []string
-			rows = append(rows, lipgloss.NewStyle().Foreground(colYellow).Bold(true).Render(sec.title), "")
+			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
 			for _, b := range sec.keys {
 				h := b.Help()
 				rows = append(rows, t.helpKey.Width(8).Render(h.Key)+t.helpDesc.Render(h.Desc))
@@ -798,19 +799,22 @@ func (m *Model) renderOverlay() (string, []zone) {
 		return box.Render(content), nil
 
 	case overlayQuit:
-		return dialog(colYellow, []string{
+		return dialog(colWarning, []string{
 			title("Unsaved changes"), "",
 			t.text.Render("Save " + m.displayName() + " before quitting?"),
 		})
 
 	case overlaySaveAs:
-		return dialog(colGopher, []string{
+		return dialog(colPrimary, []string{
 			title("Save notebook as"), "",
 			m.input.View(),
 		})
 
 	case overlayMenu:
 		return m.renderMenu()
+
+	case overlayTheme:
+		return m.renderThemePicker()
 	}
 	return "", nil
 }
@@ -840,7 +844,7 @@ func (m *Model) renderMenu() (string, []zone) {
 		case j == m.menu.idx:
 			row = t.btnHover.Render(" " + label + "   " + keyStr + " ")
 		case it.danger:
-			row = " " + lipgloss.NewStyle().Foreground(colRed).Render(label) + "   " + t.muted.Render(keyStr) + " "
+			row = " " + lipgloss.NewStyle().Foreground(colError).Render(label) + "   " + t.muted.Render(keyStr) + " "
 		default:
 			row = " " + t.text.Render(label) + "   " + t.muted.Render(keyStr) + " "
 		}

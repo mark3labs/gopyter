@@ -6,26 +6,60 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// Palette based on the Go brand colors.
+// The active palette. These are package-level so that every renderer, including
+// ones without access to the Model (editor, highlighter, completion popup),
+// shares one source of truth. They are only reassigned by setPalette, which
+// runs on the Bubble Tea goroutine (at startup and from the theme picker),
+// the same goroutine that renders, so they need no locking.
 var (
-	colGopher  = lipgloss.Color("#00ADD8")
-	colSky     = lipgloss.Color("#5DC9E2")
-	colFuchsia = lipgloss.Color("#CE3262")
-	colYellow  = lipgloss.Color("#FDDD00")
-	colPurple  = lipgloss.Color("#8B5CF6")
-	colGreen   = lipgloss.Color("#4ADE80")
-	colRed     = lipgloss.Color("#F87171")
-	colOrange  = lipgloss.Color("#FB923C")
+	colPrimary  color.Color // selection, focus, links: Go gopher blue by default
+	colInfo     color.Color // results, tooltips
+	colAccent   color.Color // logo gradient end, vim visual mode
+	colSuccess  color.Color
+	colWarning  color.Color // running state, section titles
+	colError    color.Color
+	colErrorBar color.Color // gutter bar beside error output
+	colOrange   color.Color // stderr, interrupted, vim insert mode
 
-	colSelection = lipgloss.Color("#1F4E6B")
+	colSelection color.Color // text selection and highlighted list rows
+	colRaised    color.Color // hovered dialog buttons
 
-	colText   = lipgloss.Color("#E4E4E7")
-	colDim    = lipgloss.Color("#A1A1AA")
-	colMuted  = lipgloss.Color("#71717A")
-	colSubtle = lipgloss.Color("#3F3F46")
-	colFaint  = lipgloss.Color("#27272A")
-	colInk    = lipgloss.Color("#101014")
+	colText   color.Color
+	colDim    color.Color
+	colMuted  color.Color
+	colSubtle color.Color
+	colFaint  color.Color
+	colInk    color.Color // text drawn on colored backgrounds; the theme background
 )
+
+func init() { setPalette(defaultTheme().palette(true)) }
+
+// palette is a resolved set of hex colors a UI theme is built from.
+type palette struct {
+	primary, info, accent, success, warning, error, errorBar, orange string
+	selection, raised                                                string
+	text, dim, muted, subtle, faint, ink                             string
+
+	// Syntax highlighting: syntax names a chroma style; when empty a style
+	// is derived from the keyword/str/number/comment/name colors.
+	syntax                              string
+	keyword, str, number, comment, name string
+
+	// markdown names a glamour standard style; when empty one is derived
+	// from the palette.
+	markdown string
+}
+
+// setPalette makes p the active palette.
+func setPalette(p palette) {
+	c := lipgloss.Color
+	colPrimary, colInfo, colAccent = c(p.primary), c(p.info), c(p.accent)
+	colSuccess, colWarning, colError = c(p.success), c(p.warning), c(p.error)
+	colErrorBar, colOrange = c(p.errorBar), c(p.orange)
+	colSelection, colRaised = c(p.selection), c(p.raised)
+	colText, colDim, colMuted = c(p.text), c(p.dim), c(p.muted)
+	colSubtle, colFaint, colInk = c(p.subtle), c(p.faint), c(p.ink)
+}
 
 type theme struct {
 	text, dim, muted, subtle lipgloss.Style
@@ -49,6 +83,7 @@ type theme struct {
 	link, linkHover                          lipgloss.Style
 }
 
+// newTheme builds the styles from the active palette.
 func newTheme() theme {
 	s := lipgloss.NewStyle
 	return theme{
@@ -58,45 +93,45 @@ func newTheme() theme {
 		subtle: s().Foreground(colSubtle),
 
 		borderIdle: colSubtle,
-		borderCmd:  colGopher,
-		borderEdit: colGreen,
-		borderRun:  colYellow,
+		borderCmd:  colPrimary,
+		borderEdit: colSuccess,
+		borderRun:  colWarning,
 
 		lineNo:       s().Foreground(colSubtle),
 		lineNoActive: s().Foreground(colDim),
 
 		stdout:      s().Foreground(colText),
 		stderr:      s().Foreground(colOrange),
-		result:      s().Foreground(colSky),
+		result:      s().Foreground(colInfo),
 		info:        s().Foreground(colMuted).Italic(true),
-		errorText:   s().Foreground(colRed),
-		errorBar:    s().Foreground(colFuchsia),
-		resultLabel: s().Foreground(colYellow),
+		errorText:   s().Foreground(colError),
+		errorBar:    s().Foreground(colErrorBar),
+		resultLabel: s().Foreground(colWarning),
 		inLabel:     s().Foreground(colMuted),
 
-		modeCmd:  s().Foreground(colInk).Background(colGopher).Bold(true).Padding(0, 1),
-		modeEdit: s().Foreground(colInk).Background(colGreen).Bold(true).Padding(0, 1),
+		modeCmd:  s().Foreground(colInk).Background(colPrimary).Bold(true).Padding(0, 1),
+		modeEdit: s().Foreground(colInk).Background(colSuccess).Bold(true).Padding(0, 1),
 
 		modeInsert: s().Foreground(colInk).Background(colOrange).Bold(true).Padding(0, 1),
-		modeVisual: s().Foreground(colInk).Background(colPurple).Bold(true).Padding(0, 1),
+		modeVisual: s().Foreground(colInk).Background(colAccent).Bold(true).Padding(0, 1),
 
 		helpKey:  s().Foreground(colDim).Bold(true),
 		helpDesc: s().Foreground(colMuted),
 		helpSep:  s().Foreground(colSubtle),
 
-		statusOK:  s().Foreground(colGreen),
-		statusErr: s().Foreground(colRed),
-		statusRun: s().Foreground(colYellow),
+		statusOK:  s().Foreground(colSuccess),
+		statusErr: s().Foreground(colError),
+		statusRun: s().Foreground(colWarning),
 
 		btn:         s().Foreground(colDim),
-		btnHover:    s().Foreground(colInk).Background(colGopher).Bold(true),
-		btnDanger:   s().Foreground(colInk).Background(colRed).Bold(true),
+		btnHover:    s().Foreground(colInk).Background(colPrimary).Bold(true),
+		btnDanger:   s().Foreground(colInk).Background(colError).Bold(true),
 		btnDisabled: s().Foreground(colSubtle),
 		dlgBtn:      s().Foreground(colDim).Background(colSubtle).Padding(0, 2),
-		dlgBtnHover: s().Foreground(colText).Background(lipgloss.Color("#52525B")).Padding(0, 2),
-		dlgFocus:    s().Foreground(colInk).Background(colGopher).Bold(true).Padding(0, 2),
-		dlgDanger:   s().Foreground(colInk).Background(colRed).Bold(true).Padding(0, 2),
+		dlgBtnHover: s().Foreground(colText).Background(colRaised).Padding(0, 2),
+		dlgFocus:    s().Foreground(colInk).Background(colPrimary).Bold(true).Padding(0, 2),
+		dlgDanger:   s().Foreground(colInk).Background(colError).Bold(true).Padding(0, 2),
 		link:        s().Foreground(colMuted),
-		linkHover:   s().Foreground(colGopher).Underline(true),
+		linkHover:   s().Foreground(colPrimary).Underline(true),
 	}
 }

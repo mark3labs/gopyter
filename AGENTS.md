@@ -18,6 +18,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 |---------------------|---------------------------------------------------------------------------|
 | `main.go`           | cobra commands (`gopyter`, `gopyter run`) executed through `fang`         |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs |
+| `internal/config`   | user settings (the theme) persisted as JSON in the user config dir         |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
@@ -67,8 +68,10 @@ concatenation in WriteString") count as issues to fix too.
   add a comment saying why (errcheck is enabled).
 - Build strings with separate `WriteString` calls, not `+` inside
   `WriteString`.
-- Use the palette and styles in `internal/ui/theme.go` rather than ad-hoc
-  colors.
+- Use the palette (`col*` vars) and styles in `internal/ui/theme.go` rather
+  than ad-hoc colors, so every theme applies. Themes live in `themes.go`:
+  gopyter's default plus kit's presets (kept verbatim in `kitThemes`), each
+  with light and dark variants.
 - Keep comments explaining *why*. Exported identifiers get doc comments.
 
 ## Architecture notes (read before changing these areas)
@@ -116,6 +119,10 @@ concatenation in WriteString") count as issues to fix too.
   `Editor.vimMotion`, and vim edits wrap in `begin`/`end` so each command is
   one undo step. Visual mode uses the editor selection with an inclusive or
   linewise `selMode`; `vimSync` converts mouse selections.
+- Themes (`themepicker.go`): `applyTheme` swaps the global palette and
+  rebuilds everything derived from it (styles, highlighter, glamour style,
+  help/input styles, cached cell renders). Anything new that caches styled
+  output must be invalidated there too.
 - Completion (`completion.go`) is debounced, and responses are matched by
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.

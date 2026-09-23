@@ -24,6 +24,7 @@ const (
 	actRestart
 	actSave
 	actHelp
+	actTheme
 	actToggleMode
 
 	// Per cell (action.cell is the cell index).
@@ -59,6 +60,7 @@ const (
 	actDialogConfirm
 	actMenuItem       // action.cell is the item index
 	actCompletionItem // action.cell is the completion item index
+	actThemeItem      // action.cell is the theme picker entry index
 )
 
 type action struct {
@@ -210,6 +212,9 @@ func (m *Model) handleMouseMotion(ms tea.Mouse) tea.Cmd {
 	if m.overlay == overlayMenu && m.hover.kind == actMenuItem {
 		m.menu.idx = m.hover.cell
 	}
+	if m.overlay == overlayTheme && m.hover.kind == actThemeItem {
+		m.previewTheme(m.hover.cell)
+	}
 	if m.comp.open && m.hover.kind == actCompletionItem {
 		m.comp.idx = m.hover.cell
 	}
@@ -354,6 +359,15 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 	if m.overlay == overlayMenu {
 		m.overlay = overlayNone
 	}
+	if m.overlay == overlayTheme {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.previewTheme(max(m.themes.idx-1, 0))
+		case tea.MouseWheelDown:
+			m.previewTheme(min(m.themes.idx+1, len(m.themes.names)-1))
+		}
+		return nil
+	}
 	if m.overlay != overlayNone {
 		return nil
 	}
@@ -392,6 +406,10 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 	switch m.overlay {
 	case overlayHelp:
 		m.overlay = overlayNone
+	case overlayTheme:
+		if !inside {
+			return m.cancelTheme()
+		}
 	case overlayMenu:
 		if !inside {
 			m.overlay = overlayNone
@@ -537,6 +555,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.saveCmd()
 	case actHelp:
 		m.overlay = overlayHelp
+	case actTheme:
+		return m.openThemePicker()
+	case actThemeItem:
+		return m.confirmTheme(a.cell)
 	case actToggleMode:
 		if m.mode == modeEdit {
 			m.leaveEdit()

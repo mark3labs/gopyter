@@ -461,7 +461,7 @@ func (m *Model) renderCompletion(cx, cy int) (string, int, int, []zone) {
 			}
 			icon := bg.Foreground(lipgloss.Color(ki.col)).Bold(true).Render(" " + ki.icon + " ")
 			base := bg.Foreground(colText)
-			hi := bg.Foreground(colGopher).Bold(true)
+			hi := bg.Foreground(colPrimary).Bold(true)
 			label := highlightMatch(ansi.Truncate(it.Label, labelW, "…"), typed, base, hi)
 			label += bg.Render(strings.Repeat(" ", labelW-lipgloss.Width(ansi.Strip(label))+1))
 			row := icon + label
@@ -564,7 +564,7 @@ func (m *Model) completionDoc(width int) string {
 	}
 	var parts []string
 	if it.Detail != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(colSky).Render(ansi.Wrap(it.Label+" "+it.Detail, width, "")))
+		parts = append(parts, lipgloss.NewStyle().Foreground(colInfo).Render(ansi.Wrap(it.Label+" "+it.Detail, width, "")))
 	}
 	if d := strings.TrimSpace(it.Doc); d != "" {
 		wrapped := strings.Split(ansi.Wrap(d, width, ""), "\n")

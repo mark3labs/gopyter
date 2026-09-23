@@ -16,11 +16,16 @@ type highlighter struct {
 	cache map[chroma.TokenType]lipgloss.Style
 }
 
+// newHighlighter uses the named chroma style, or the fallback if unknown.
 func newHighlighter(name string) *highlighter {
 	st := styles.Get(name)
 	if st == nil {
 		st = styles.Fallback
 	}
+	return newHighlighterStyle(st)
+}
+
+func newHighlighterStyle(st *chroma.Style) *highlighter {
 	return &highlighter{style: st, cache: map[chroma.TokenType]lipgloss.Style{}}
 }
 

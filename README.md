@@ -4,7 +4,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 
 ```
  ◆ gopyter   hello.ipynb ●                                        gopls  │  go1.27.1  │  ● idle
-── ▶ run ─ ▶▶ run all ─ ■ stop ─ ↻ restart ───┼─ + code ─ + markdown ───┼─ save ─ ? help ───────
+── ▶ run ─ ▶▶ run all ─ ■ stop ─ ↻ restart ───┼─ + code ─ + markdown ───┼─ save ─ ◐ theme ─ ? help ─
          ╭─ go ───────────────────────────────────────────────────────────────────── ✓ 137ms ─╮
      [1] │ 1  type Point struct{ X, Y float64 }                                               │
          │ 2                                                                                  │
@@ -23,6 +23,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter
+- **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
 
 ## Install
@@ -122,6 +123,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `m` / `y` (`ctrl+t` editing) | convert to markdown / code               |
 | `o` / `O`                    | fold long output / clear output          |
 | `ctrl+s` / `q`               | save / quit                              |
+| `T`                          | pick a color theme                       |
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
 copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
@@ -155,9 +157,31 @@ with `shift+enter` or `ctrl+j` (`ctrl+r` still runs from INSERT and command mode
 Click a cell to edit it, and drag, double-click or triple-click to select text.
 Hover `[n]` and click `[▶]` to run a cell; the buttons on a cell's border run,
 convert, move, duplicate or delete it. Right-click opens a context menu, and the
-toolbar under the title covers running, adding cells, saving and help. Hovering
+toolbar under the title covers running, adding cells, saving, themes and help. Hovering
 any button shows what it does and its shortcut. Hold `shift` while dragging to
 use your terminal's own selection instead (`alt`/`option` in some terminals).
+
+## Themes
+
+Press `T` (or click **◐ theme**) to pick a theme. Moving through the list
+previews each one live; `enter` keeps it and `esc` restores the previous one.
+The default is gopyter's own theme; the others are the built-in themes of
+[kit](https://github.com/mark3labs/kit). Each has a light and a dark variant,
+chosen from your terminal's background.
+
+The choice is saved to `$XDG_CONFIG_HOME/gopyter/config.json` (usually
+`~/.config/gopyter/config.json`; `~/Library/Application Support/gopyter/` on
+macOS):
+
+```json
+{ "theme": "catppuccin" }
+```
+
+```sh
+gopyter themes                     # list themes, marking the active one
+gopyter --theme dracula notes.ipynb  # use a theme for this session only
+gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
+```
 
 ## Headless
 
