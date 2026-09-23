@@ -128,6 +128,28 @@ copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
 `shift+enter` and `ctrl+enter` need a terminal with the kitty keyboard protocol
 (kitty, Ghostty, WezTerm, foot…); `ctrl+r` and `ctrl+j` work everywhere.
 
+### Vim bindings
+
+Start with `gopyter --vim` to edit cells with vim keys. Edit mode then has
+vim's own modes, shown in the footer: `enter` opens a cell in **NORMAL**, `esc`
+goes from INSERT to NORMAL and from NORMAL back to command mode. New cells open
+in INSERT.
+
+| Keys                                   | Action                                   |
+|----------------------------------------|------------------------------------------|
+| `i` `a` `I` `A` `o` `O`                | insert / append / open a line            |
+| `h` `j` `k` `l` `w` `b` `e` `W` `B` `E`| move (`j`/`k` flow between cells)        |
+| `0` `^` `$` `gg` `G`                   | line start / end, first / last line      |
+| `d` `c` `y` + motion, `dd` `cc` `yy`   | delete / change / yank (with counts: `3dw`, `2dd`) |
+| `x` `X` `D` `C` `s` `S` `Y` `J`        | the usual shorthands                     |
+| `p` `P`                                | put after / before                       |
+| `v` `V`, then `d` `c` `y` `o`          | visual and visual-line mode              |
+| `u` / `ctrl+r`                         | undo / redo                              |
+
+Yanks also go to the system clipboard, and a mouse selection turns into a
+visual selection. Since `ctrl+r` is redo in NORMAL mode, run cells from there
+with `shift+enter` or `ctrl+j` (`ctrl+r` still runs from INSERT and command mode).
+
 ## Mouse
 
 Click a cell to edit it, and drag, double-click or triple-click to select text.

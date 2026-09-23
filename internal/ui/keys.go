@@ -104,7 +104,49 @@ type helpSection struct {
 	keys  []key.Binding
 }
 
-func (k keyMap) fullHelp() []helpSection {
+// hint is a help-only binding.
+func hint(keys, desc string) key.Binding {
+	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
+}
+
+// vimNormalShort returns the footer hints for vim normal mode.
+func (k keyMap) vimNormalShort() []key.Binding {
+	return []key.Binding{
+		hint("i", "insert"), hint("v", "visual"), hint("esc", "command mode"),
+		hint("⇧↵", "run & next"), hint("u", "undo"), k.Save,
+	}
+}
+
+// vimInsertShort returns the footer hints for vim insert mode.
+func (k keyMap) vimInsertShort() []key.Binding {
+	return []key.Binding{hint("esc", "normal"), k.RunAdvance, k.Run, k.RunInsert, k.Undo, k.Save}
+}
+
+// vimVisualShort returns the footer hints for vim visual mode.
+func (k keyMap) vimVisualShort() []key.Binding {
+	return []key.Binding{hint("d", "delete"), hint("y", "yank"), hint("c", "change"), hint("esc", "normal")}
+}
+
+// fullHelp returns the help overlay sections; vim adds its own.
+func (k keyMap) fullHelp(vim bool) []helpSection {
+	secs := k.baseHelp()
+	if vim {
+		secs = append(secs, helpSection{"Vim (edit mode)", []key.Binding{
+			hint("i a o", "insert / open line"),
+			hint("esc", "normal / command"),
+			hint("v V", "visual / line"),
+			hint("d c y", "delete/change/yank"),
+			hint("dd yy", "whole lines"),
+			hint("x D C", "char / line end"),
+			hint("p P", "put"),
+			hint("u ^r", "undo / redo"),
+			hint("w b $ G", "motions, 3w"),
+		}})
+	}
+	return secs
+}
+
+func (k keyMap) baseHelp() []helpSection {
 	return []helpSection{
 		{"Running", []key.Binding{k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},

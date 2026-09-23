@@ -38,6 +38,7 @@ type theme struct {
 	resultLabel, inLabel                              lipgloss.Style
 
 	modeCmd, modeEdit          lipgloss.Style
+	modeInsert, modeVisual     lipgloss.Style
 	helpKey, helpDesc, helpSep lipgloss.Style
 
 	statusOK, statusErr, statusRun lipgloss.Style
@@ -75,6 +76,10 @@ func newTheme() theme {
 
 		modeCmd:  s().Foreground(colInk).Background(colGopher).Bold(true).Padding(0, 1),
 		modeEdit: s().Foreground(colInk).Background(colGreen).Bold(true).Padding(0, 1),
+
+		modeInsert: s().Foreground(colInk).Background(colOrange).Bold(true).Padding(0, 1),
+		modeVisual: s().Foreground(colInk).Background(colPurple).Bold(true).Padding(0, 1),
+
 		helpKey:  s().Foreground(colDim).Bold(true),
 		helpDesc: s().Foreground(colMuted),
 		helpSep:  s().Foreground(colSubtle),

@@ -77,6 +77,8 @@ type Options struct {
 	SyntaxTheme string
 	// Completer provides code completion (optional).
 	Completer Completer
+	// Vim enables vim key bindings in edit mode.
+	Vim bool
 }
 
 // Model is the root Bubble Tea model.
@@ -85,6 +87,7 @@ type Model struct {
 
 	completer Completer
 	comp      completionState
+	vim       vimState
 	path      string
 	meta      map[string]any
 	cells     []*Cell
@@ -160,6 +163,7 @@ func New(opts Options) *Model {
 		keys: newKeyMap(), hl: newHighlighter(opts.SyntaxTheme), theme: newTheme(),
 		follow: true, hoverCell: -1,
 	}
+	m.vim.enabled = opts.Vim
 	for _, c := range nb.Cells {
 		m.cells = append(m.cells, fromNotebook(c))
 		m.counter = max(m.counter, c.ExecutionCount)
@@ -194,6 +198,7 @@ func New(opts Options) *Model {
 	// Start in edit mode on a fresh, empty notebook.
 	if len(m.cells) == 1 && m.cells[0].ed.Value() == "" {
 		m.mode = modeEdit
+		m.vim.mode = vimInsert
 	}
 	return m
 }
@@ -279,13 +284,17 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleWheel(msg.Mouse())
 
 	case tea.MouseClickMsg:
-		return m, m.handleMouseDown(msg.Mouse())
+		cmd := m.handleMouseDown(msg.Mouse())
+		m.vimSync()
+		return m, cmd
 
 	case tea.MouseMotionMsg:
 		return m, m.handleMouseMotion(msg.Mouse())
 
 	case tea.MouseReleaseMsg:
-		return m, m.handleMouseRelease()
+		cmd := m.handleMouseRelease()
+		m.vimSync()
+		return m, cmd
 
 	case tea.ClipboardMsg:
 		if m.overlay == overlayNone && m.mode == modeEdit && msg.Content != "" {
@@ -331,7 +340,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	k := m.keys
 
 	// The completion popup gets first pick of keys while it's open.
-	if m.mode == modeEdit {
+	if m.mode == modeEdit && m.vimInsertMode() {
 		if cmd, ok := m.completionKey(msg); ok {
 			return cmd
 		}
@@ -342,7 +351,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Global bindings.
 	switch {
-	case key.Matches(msg, k.RunAdvance):
+	case key.Matches(msg, k.RunAdvance) && (!m.vimActive() || msg.String() != "ctrl+r"):
+		// In vim normal mode ctrl+r is redo; shift+enter still runs.
 		return m.runSelected(true, false)
 	case key.Matches(msg, k.Run):
 		return m.runSelected(false, false)
@@ -363,10 +373,19 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.requestQuit()
 	}
 
+	if m.vimActive() {
+		m.closeCompletion()
+		return m.handleVimKey(msg)
+	}
 	if m.mode == modeEdit {
 		c := m.cur()
 		id, version := c.id, c.ed.version
 		cmd := m.handleEditKey(msg)
+		if !m.vimInsertMode() {
+			// esc just left vim's insert mode.
+			m.closeCompletion()
+			return cmd
+		}
 		return tea.Batch(cmd, m.afterEditKey(msg, id, version))
 	}
 	return m.handleCommandKey(msg)
@@ -408,6 +427,10 @@ func (m *Model) handleEditKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	switch ks {
 	case "esc":
+		if m.vim.enabled {
+			m.vimEscapeInsert()
+			return nil
+		}
 		if ed.HasSelection() {
 			ed.ClearSelection()
 			return nil
@@ -539,9 +562,17 @@ func (m *Model) leaveEdit() {
 		ed.breakUndo()
 	}
 	m.mode = modeCommand
+	m.vim.reset()
 }
 
+// enterEdit switches to edit mode. With vim bindings, entering from
+// command mode starts in normal mode; moving between cells keeps the mode.
 func (m *Model) enterEdit() {
+	if m.mode != modeEdit && m.vim.enabled {
+		m.vim.reset()
+		m.vim.mode = vimNormal
+		m.cur().ed.clampNormal()
+	}
 	m.mode = modeEdit
 	c := m.cur()
 	c.mdOut = "" // re-render markdown after editing
@@ -662,6 +693,8 @@ func (m *Model) insertCell(i int, c *Cell) {
 	m.sel = i
 	m.dirty = true
 	m.enterEdit()
+	// A new cell is for typing.
+	m.vim.mode = vimInsert
 }
 
 func (m *Model) deleteCell(i int) {

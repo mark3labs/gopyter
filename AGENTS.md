@@ -110,6 +110,12 @@ concatenation in WriteString") count as issues to fix too.
 - The editor (`editor.go`) is custom rather than `bubbles/textarea`. Edits go
   through `push()` for undo, and selection-aware operations must handle
   `HasSelection()`.
+- Vim bindings (`--vim`, `vim.go`, `editor_vim.go`) layer NORMAL/INSERT/VISUAL
+  sub-modes over edit mode. INSERT reuses `handleEditKey`; other keys go to
+  `handleVimKey`, parsed as `[count] operator [count] motion`. Motions are
+  `Editor.vimMotion`, and vim edits wrap in `begin`/`end` so each command is
+  one undo step. Visual mode uses the editor selection with an inclusive or
+  linewise `selMode`; `vimSync` converts mouse selections.
 - Completion (`completion.go`) is debounced, and responses are matched by
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.

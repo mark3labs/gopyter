@@ -39,6 +39,11 @@ type Editor struct {
 	// Selection: anchor is the fixed end, the cursor is the moving end.
 	anchor    Pos
 	selecting bool
+	selMode   selMode
+
+	// txn > 0 while a compound edit is in progress: its inner operations
+	// share the single undo snapshot recorded by begin.
+	txn int
 
 	tokVersion int
 	tokens     [][]chroma.TokenType
@@ -57,7 +62,7 @@ func (e *Editor) setText(text string) {
 	for l := range strings.SplitSeq(text, "\n") {
 		e.lines = append(e.lines, []rune(l))
 	}
-	e.selecting = false
+	e.selecting, e.selMode = false, selExclusive
 	e.row = min(e.row, len(e.lines)-1)
 	e.col = min(e.col, len(e.lines[e.row]))
 	e.version++
@@ -105,6 +110,9 @@ func (e *Editor) CursorEnd() {
 // push records an undo snapshot. Consecutive operations of the same kind
 // are coalesced.
 func (e *Editor) push(op string) {
+	if e.txn > 0 {
+		return
+	}
 	if op == e.lastOp && op != "set" && len(e.undo) > 0 {
 		return
 	}
@@ -487,14 +495,15 @@ func (e *Editor) StartSelection() {
 }
 
 // ClearSelection drops the selection.
-func (e *Editor) ClearSelection() { e.selecting = false }
+func (e *Editor) ClearSelection() { e.selecting, e.selMode = false, selExclusive }
 
-// HasSelection reports whether a non-empty selection is active.
+// HasSelection reports whether a non-empty selection is active. Vim visual
+// selections always cover at least the character under the cursor.
 func (e *Editor) HasSelection() bool {
-	return e.selecting && (e.anchor.Row != e.row || e.anchor.Col != e.col)
+	return e.selecting && (e.selMode != selExclusive || e.anchor.Row != e.row || e.anchor.Col != e.col)
 }
 
-// Selection returns the ordered selection bounds.
+// Selection returns the ordered selection bounds, end exclusive.
 func (e *Editor) Selection() (start, end Pos, ok bool) {
 	if !e.HasSelection() {
 		return Pos{}, Pos{}, false
@@ -503,14 +512,37 @@ func (e *Editor) Selection() (start, end Pos, ok bool) {
 	if b.before(a) {
 		a, b = b, a
 	}
+	switch e.selMode {
+	case selInclusive:
+		b = e.charAfter(b)
+	case selLines:
+		a.Col = 0
+		if b.Row < len(e.lines)-1 {
+			b = Pos{b.Row + 1, 0}
+		} else {
+			b.Col = len(e.lines[b.Row])
+		}
+	}
 	return a, b, true
+}
+
+// charAfter returns the position just past the character at p, crossing
+// the line break when p is at the end of a line.
+func (e *Editor) charAfter(p Pos) Pos {
+	switch {
+	case p.Col < len(e.lines[p.Row]):
+		return Pos{p.Row, p.Col + 1}
+	case p.Row < len(e.lines)-1:
+		return Pos{p.Row + 1, 0}
+	}
+	return p
 }
 
 // SelectRange selects from a (anchor) to b (cursor).
 func (e *Editor) SelectRange(a, b Pos) {
 	a.Row = clamp(a.Row, 0, len(e.lines)-1)
 	a.Col = clamp(a.Col, 0, len(e.lines[a.Row]))
-	e.anchor, e.selecting = a, true
+	e.anchor, e.selecting, e.selMode = a, true, selExclusive
 	e.SetCursor(b.Row, b.Col)
 }
 
@@ -586,7 +618,7 @@ func (e *Editor) deleteRange(a, b Pos) {
 	rest := append([][]rune{merged}, e.lines[b.Row+1:]...)
 	e.lines = append(e.lines[:a.Row], rest...)
 	e.row, e.col = a.Row, a.Col
-	e.selecting = false
+	e.selecting, e.selMode = false, selExclusive
 	e.changed()
 }
 

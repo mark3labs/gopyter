@@ -204,6 +204,20 @@ func (m *Model) renderFooter() string {
 		pill = t.modeEdit.Render("EDIT")
 		bindings = m.keys.editShort()
 		tip = "switch to command mode · esc"
+		if m.vim.enabled {
+			st := t.modeEdit
+			switch m.vim.mode {
+			case vimNormal:
+				bindings = m.keys.vimNormalShort()
+			case vimInsert:
+				st = t.modeInsert
+				bindings = m.keys.vimInsertShort()
+			case vimVisual, vimVisualLine:
+				st = t.modeVisual
+				bindings = m.keys.vimVisualShort()
+			}
+			pill = st.Render(m.vim.mode.String())
+		}
 	}
 	toggle := action{kind: actToggleMode}
 	if m.hovered(toggle) {
@@ -232,6 +246,8 @@ func (m *Model) renderFooter() string {
 		mid = lipgloss.NewStyle().Foreground(colSky).Render("› " + m.hoverTip)
 	} else if m.pendingKey != "" {
 		mid = t.dim.Render(m.pendingKey + "…")
+	} else if p := m.vim.pending(); p != "" && m.vimActive() {
+		mid = t.dim.Render(p + "…")
 	} else {
 		m.help.SetWidth(avail)
 		mid = m.help.ShortHelpView(bindings)
@@ -348,6 +364,9 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 			if y >= 0 && y < vh {
 				cursor = tea.NewCursor(l.render.edLeft+l.render.ev.curX, y+headerHeight)
 				cursor.Shape = tea.CursorBar
+				if m.vimActive() {
+					cursor.Shape = tea.CursorBlock
+				}
 				cursor.Color = colGreen
 			}
 		}
@@ -751,7 +770,7 @@ func (m *Model) renderOverlay() (string, []zone) {
 	case overlayHelp:
 		var cols []string
 		var grid string
-		for _, sec := range m.keys.fullHelp() {
+		for _, sec := range m.keys.fullHelp(m.vim.enabled) {
 			var rows []string
 			rows = append(rows, lipgloss.NewStyle().Foreground(colYellow).Bold(true).Render(sec.title), "")
 			for _, b := range sec.keys {

@@ -43,6 +43,7 @@ func rootCmd() *cobra.Command {
 		workdir    string
 		theme      string
 		noComplete bool
+		vim        bool
 	)
 	cmd := &cobra.Command{
 		Use:   "gopyter [notebook.ipynb]",
@@ -69,7 +70,7 @@ func rootCmd() *cobra.Command {
 				return err
 			}
 			defer closeKernel(k)
-			opts := ui.Options{Path: path, Notebook: nb, Kernel: k, SyntaxTheme: theme}
+			opts := ui.Options{Path: path, Notebook: nb, Kernel: k, SyntaxTheme: theme, Vim: vim}
 			if !noComplete {
 				engine := complete.New(k)
 				defer func() { _ = engine.Close() }()
@@ -81,6 +82,7 @@ func rootCmd() *cobra.Command {
 	cmd.PersistentFlags().StringVar(&workdir, "workdir", "", "persistent kernel workspace (Go module) directory; a temporary one is used by default")
 	cmd.Flags().StringVar(&theme, "syntax-theme", "catppuccin-mocha", "chroma syntax highlighting theme")
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
+	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode")
 
 	cmd.AddCommand(runCmd(&workdir))
 	return cmd
