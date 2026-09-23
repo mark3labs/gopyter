@@ -88,6 +88,8 @@ type Options struct {
 	Completer Completer
 	// Vim enables vim key bindings in edit mode.
 	Vim bool
+	// SaveVim persists vim bindings toggled in the UI (optional).
+	SaveVim func(on bool) error
 }
 
 // Model is the root Bubble Tea model.
@@ -174,6 +176,7 @@ func New(opts Options) *Model {
 	m.themes.syntax = opts.SyntaxTheme
 	m.themes.save = opts.SaveTheme
 	m.vim.enabled = opts.Vim
+	m.vim.save = opts.SaveVim
 	for _, c := range nb.Cells {
 		m.cells = append(m.cells, fromNotebook(c))
 		m.counter = max(m.counter, c.ExecutionCount)
@@ -665,6 +668,8 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.overlay = overlayHelp
 	case key.Matches(msg, k.Theme):
 		return m.openThemePicker()
+	case key.Matches(msg, k.ToggleVim):
+		return m.toggleVim()
 	case key.Matches(msg, k.Quit):
 		return m.requestQuit()
 	case msg.String() == "esc":

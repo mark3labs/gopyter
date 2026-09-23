@@ -33,6 +33,7 @@ func (v vimMode) String() string {
 type vimState struct {
 	enabled bool
 	mode    vimMode
+	save    func(bool) error // persists a toggled setting; may be nil
 
 	count   int    // count being typed (0 = none)
 	opCount int    // count typed before the pending operator (0 = none)
@@ -79,6 +80,31 @@ func (m *Model) vimActive() bool {
 // always without vim, and in vim's insert mode.
 func (m *Model) vimInsertMode() bool {
 	return !m.vim.enabled || m.vim.mode == vimInsert
+}
+
+// toggleVim switches vim bindings on or off and persists the choice.
+func (m *Model) toggleVim() tea.Cmd {
+	v := &m.vim
+	v.enabled = !v.enabled
+	v.reset()
+	if m.mode == modeEdit {
+		// Keep typing working: enabling lands in INSERT, and disabling
+		// drops any visual selection.
+		m.cur().ed.ClearSelection()
+	}
+	// Outside edit mode this is moot: enterEdit picks NORMAL.
+	v.mode = vimInsert
+
+	state := "off"
+	if v.enabled {
+		state = "on"
+	}
+	if v.save != nil {
+		if err := v.save(v.enabled); err != nil {
+			return m.setStatus(statusError, "vim bindings %s but not saved: %v", state, err)
+		}
+	}
+	return m.setStatus(statusSuccess, "vim bindings %s", state)
 }
 
 // vimSetMode switches the vim sub-mode, updating the selection to match.

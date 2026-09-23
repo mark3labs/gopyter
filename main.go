@@ -74,12 +74,18 @@ func rootCmd() *cobra.Command {
 				return err
 			}
 			defer closeKernel(k)
-			name, err := resolveTheme(cmd, theme)
+			settings := loadSettings(cmd)
+			name, err := resolveTheme(cmd, theme, settings)
 			if err != nil {
 				return err
 			}
+			// An explicit --vim / --vim=false wins for this session only.
+			if !cmd.Flags().Changed("vim") {
+				vim = settings.Vim
+			}
 			opts := ui.Options{
-				Path: path, Notebook: nb, Kernel: k, Vim: vim,
+				Path: path, Notebook: nb, Kernel: k,
+				Vim: vim, SaveVim: saveVim,
 				Theme: name, SyntaxTheme: syntax, SaveTheme: saveTheme,
 				// Probe before the TUI takes over the terminal, so the
 				// query can't race the program's input reader.
@@ -97,7 +103,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&theme, "theme", "", "color theme for this session (see 'gopyter themes'); the saved theme is used by default")
 	cmd.Flags().StringVar(&syntax, "syntax-theme", "", "chroma syntax highlighting style, overriding the theme's")
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
-	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode")
+	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 
 	cmd.AddCommand(runCmd(&workdir), themesCmd())
 	return cmd
@@ -142,20 +148,26 @@ func runCmd(workdir *string) *cobra.Command {
 	return cmd
 }
 
+// loadSettings reads the saved settings. Errors are only reported, so a
+// broken config never prevents gopyter from starting.
+func loadSettings(cmd *cobra.Command) config.Settings {
+	s, err := config.Load()
+	if err != nil {
+		cmd.PrintErrf("gopyter: reading settings: %v\n", err)
+		return config.Settings{}
+	}
+	return s
+}
+
 // resolveTheme picks the UI theme: the --theme flag, else the saved one,
 // else the default. A bad flag is an error; a bad saved value only a warning,
 // so a stale config never prevents gopyter from starting.
-func resolveTheme(cmd *cobra.Command, flag string) (string, error) {
+func resolveTheme(cmd *cobra.Command, flag string, s config.Settings) (string, error) {
 	if flag != "" {
 		if !ui.ValidTheme(flag) {
 			return "", fmt.Errorf("unknown theme %q (available: %s)", flag, strings.Join(ui.ThemeNames(), ", "))
 		}
 		return flag, nil
-	}
-	s, err := config.Load()
-	if err != nil {
-		cmd.PrintErrf("gopyter: reading settings: %v\n", err)
-		return ui.DefaultTheme, nil
 	}
 	if s.Theme == "" {
 		return ui.DefaultTheme, nil
@@ -172,6 +184,11 @@ func saveTheme(name string) error {
 	return config.Update(func(s *config.Settings) { s.Theme = name })
 }
 
+// saveVim persists the vim bindings setting toggled in the UI.
+func saveVim(on bool) error {
+	return config.Update(func(s *config.Settings) { s.Vim = on })
+}
+
 func themesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "themes",
@@ -181,7 +198,7 @@ func themesCmd() *cobra.Command {
 			"saved to the user config directory. --theme overrides it for one session.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			current, err := resolveTheme(cmd, "")
+			current, err := resolveTheme(cmd, "", loadSettings(cmd))
 			if err != nil {
 				return err
 			}

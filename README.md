@@ -124,6 +124,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `o` / `O`                    | fold long output / clear output          |
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
+| `V`                          | turn vim bindings on / off (saved)       |
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
 copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
@@ -132,7 +133,10 @@ copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
 
 ### Vim bindings
 
-Start with `gopyter --vim` to edit cells with vim keys. Edit mode then has
+Press `V` in command mode to turn vim keys on or off. The setting is saved
+alongside the theme (`"vim": true` in the config file described under
+[Themes](#themes)), so it sticks across sessions; `gopyter --vim` or
+`--vim=false` overrides it for one session. With vim keys on, edit mode has
 vim's own modes, shown in the footer: `enter` opens a cell in **NORMAL**, `esc`
 goes from INSERT to NORMAL and from NORMAL back to command mode. New cells open
 in INSERT.

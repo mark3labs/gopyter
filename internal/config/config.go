@@ -14,12 +14,16 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 )
 
 // Settings are the persisted user preferences.
 type Settings struct {
 	// Theme is the name of the UI color theme.
 	Theme string `json:"theme,omitempty"`
+	// Vim enables vim key bindings in edit mode.
+	Vim bool `json:"vim,omitempty"`
 }
 
 // Path returns the location of the settings file.
@@ -102,7 +106,12 @@ func UpdateAt(path string, mutate func(*Settings)) error {
 	if err := json.Unmarshal(known, &knownRaw); err != nil {
 		return err
 	}
-	delete(raw, "theme") // omitempty: an empty theme removes the key
+	// Known fields are omitempty, so a zero value must remove its key.
+	st := reflect.TypeFor[Settings]()
+	for field := range st.Fields() {
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		delete(raw, name)
+	}
 	maps.Copy(raw, knownRaw)
 
 	out, err := json.MarshalIndent(raw, "", "  ")

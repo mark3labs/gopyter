@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -270,5 +271,48 @@ func TestVimDisabledKeepsEditBehaviour(t *testing.T) {
 	vimType(m, "x<esc>")
 	if got := m.cur().ed.Value(); got != "abx" || m.mode != modeCommand {
 		t.Fatalf("got %q mode=%v", got, m.mode)
+	}
+}
+
+func TestToggleVimPersists(t *testing.T) {
+	var saved []bool
+	m := New(Options{
+		Notebook: &notebook.Notebook{Cells: []*notebook.Cell{{ID: "a", Type: notebook.Code, Source: "x := 1"}}},
+		SaveVim:  func(on bool) error { saved = append(saved, on); return nil },
+	})
+	m.width, m.height = 100, 30
+	if m.mode != modeCommand || m.vim.enabled {
+		t.Fatalf("want command mode without vim, got mode %v vim %v", m.mode, m.vim.enabled)
+	}
+
+	vimType(m, "V")
+	if !m.vim.enabled || len(saved) != 1 || !saved[0] {
+		t.Fatalf("after V: enabled %v, saved %v", m.vim.enabled, saved)
+	}
+	// Entering a cell now uses vim's normal mode.
+	vimType(m, "<enter>")
+	if m.mode != modeEdit || m.vim.mode != vimNormal {
+		t.Fatalf("want vim normal mode, got mode %v vim %v", m.mode, m.vim.mode)
+	}
+
+	vimType(m, "<esc>V")
+	if m.vim.enabled || len(saved) != 2 || saved[1] {
+		t.Fatalf("after second V: enabled %v, saved %v", m.vim.enabled, saved)
+	}
+	// Without vim, typed keys are text again.
+	vimType(m, "<enter>")
+	m.cur().ed.CursorEnd()
+	vimType(m, "x")
+	assertEditor(t, m, "x := 1x", 0, 7)
+}
+
+func TestToggleVimSaveError(t *testing.T) {
+	m := New(Options{
+		Notebook: &notebook.Notebook{Cells: []*notebook.Cell{{ID: "a", Type: notebook.Code, Source: "x"}}},
+		SaveVim:  func(bool) error { return errors.New("read-only") },
+	})
+	vimType(m, "V")
+	if !m.vim.enabled || m.statusKind != statusError || !strings.Contains(m.status, "read-only") {
+		t.Fatalf("enabled %v, status %q (%v)", m.vim.enabled, m.status, m.statusKind)
 	}
 }

@@ -36,6 +36,7 @@ type keyMap struct {
 	Restart      key.Binding
 	Help         key.Binding
 	Theme        key.Binding
+	ToggleVim    key.Binding
 	Quit         key.Binding
 
 	// Edit mode
@@ -79,6 +80,7 @@ func newKeyMap() keyMap {
 		Restart:      b([]string{"R"}, "R", "restart kernel"),
 		Help:         b([]string{"?"}, "?", "help"),
 		Theme:        b([]string{"T"}, "T", "color theme"),
+		ToggleVim:    b([]string{"V"}, "V", "vim keys on/off"),
 		Quit:         b([]string{"q"}, "q", "quit"),
 
 		Escape: b([]string{"esc"}, "esc", "command mode"),
@@ -153,7 +155,7 @@ func (k keyMap) baseHelp() []helpSection {
 		{"Running", []key.Binding{k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
-		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.Save, k.Theme, k.Help, k.Quit}},
+		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
 			key.NewBinding(key.WithKeys("shift+left"), key.WithHelp("⇧+move", "select")),
