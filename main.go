@@ -69,7 +69,9 @@ func rootCmd() *cobra.Command {
 		Long: "gopyter is a Jupyter-style notebook for Go that runs entirely in your terminal.\n\n" +
 			"Declarations (func, type, var, const, import) persist across cells, statements run\n" +
 			"inside main(), and a trailing expression is displayed as the cell's result.\n" +
-			"Notebooks are stored as .ipynb files compatible with the GoNB Jupyter kernel.",
+			"Notebooks are stored as .ipynb files compatible with the GoNB Jupyter kernel\n" +
+			"(https://github.com/janpfeifer/gonb), which inspired gopyter's execution model,\n" +
+			"cell commands and widgets.",
 		Example: "  # start a new notebook\n  gopyter\n\n" +
 			"  # open (or create) a notebook\n  gopyter analysis.ipynb\n\n" +
 			"  # execute a notebook headlessly and store the outputs\n  gopyter run analysis.ipynb --save",

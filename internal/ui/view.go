@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/termimg"
 )
@@ -211,9 +212,9 @@ func (m *Model) renderFooter() string {
 	pill := t.modeCmd.Render("COMMAND")
 	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
 	tip := "switch to edit mode · enter"
-	if m.stdin.focus && m.running != nil {
+	if m.inputFocused() {
 		pill = t.modeInsert.Render("INPUT")
-		bindings = m.keys.stdinShort()
+		bindings = m.keys.inputShort(m.in.focus == focusStdin)
 		tip = "leave the program input · esc"
 	} else if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
@@ -601,13 +602,19 @@ func (m *Model) renderCell(i, width int) cellRender {
 
 	// Outputs.
 	if c.kind == notebook.Code && len(c.outputs) > 0 {
-		if key := c.outputFingerprint(boxW - 2); key != c.outKey || c.outLines == nil {
-			c.outLines, c.outResultAt = m.renderOutputs(c, boxW-2)
+		live := m.liveWidgets(c)
+		focus := ""
+		if live {
+			focus = m.in.focus
+		}
+		if key := c.outputFingerprint(boxW-2, focus, live); key != c.outKey || c.outLines == nil {
+			c.outLines, c.outResultAt, c.outWidgets = m.renderOutputs(c, boxW-2, live, focus)
 			c.outKey = key
 		}
 		out, resultAt := c.outLines, c.outResultAt
 		hidden := 0
-		if !c.expanded && len(out) > maxOutputLines {
+		// Live widgets must stay reachable: don't fold them away.
+		if !c.expanded && !live && len(out) > maxOutputLines {
 			hidden = len(out) - maxOutputLines
 			out = out[hidden:]
 			resultAt -= hidden
@@ -631,6 +638,13 @@ func (m *Model) renderCell(i, width int) cellRender {
 			x0 := gutterWidth + 2
 			r.zones = append(r.zones, zone{rect: image.Rect(x0, y, x0+lipgloss.Width(out[foldAt]), y+1), act: foldAct, tip: "toggle full output"})
 		}
+		if live {
+			top := 0
+			if foldAt == 0 {
+				top = 1
+			}
+			r.zones = append(r.zones, widgetZones(i, c.outWidgets, len(r.lines)+top-hidden, len(r.lines), len(r.lines)+len(out))...)
+		}
 		for j, l := range out {
 			lbl := blank
 			if j == resultAt {
@@ -639,28 +653,83 @@ func (m *Model) renderCell(i, width int) cellRender {
 			r.lines = append(r.lines, bar+lbl+"  "+l)
 		}
 	}
-	if m.stdinCell(c) {
-		line := m.renderStdin(boxW - 2)
-		x0, y := gutterWidth+2, len(r.lines)
-		r.zones = append(r.zones, zone{rect: image.Rect(x0, y, x0+max(lipgloss.Width(line), 1), y+1), act: action{kind: actFocusStdin, cell: i}, tip: "type input for the program · alt+i"})
+	if m.stdinCell(c) || m.liveWidgets(c) {
+		line, zones := m.renderInputLine(i, c, boxW-2)
+		r.zones = append(r.zones, translate(zones, gutterWidth+2, len(r.lines))...)
 		r.lines = append(r.lines, bar+blank+"  "+line)
 	}
 	return r
 }
 
-// renderStdin renders the input line of the running cell's program.
-func (m *Model) renderStdin(width int) string {
-	t := m.theme
-	prompt := "stdin ❯ "
-	if !m.stdin.focus {
-		hint := "enter or click to type input"
-		if m.stdin.input.Value() != "" {
-			hint = m.stdin.input.Value()
+// widgetZones returns the zones of widgets whose line 0 is at y0; only
+// lines in [yMin, yMax) are visible.
+func widgetZones(cell int, ws []htmlview.Widget, y0, yMin, yMax int) []zone {
+	var zs []zone
+	x0 := gutterWidth + 2
+	for _, w := range ws {
+		y := y0 + w.Line
+		if y < yMin || y >= yMax {
+			continue
 		}
-		return t.muted.Render(prompt) + t.subtle.Italic(true).Render(ansi.Truncate(hint, max(width-len(prompt), 1), "…"))
+		rect := image.Rect(x0+w.X0, y, x0+w.X1, y+1)
+		switch w.Kind {
+		case htmlview.Button:
+			zs = append(zs, zone{rect: rect, act: action{kind: actWidgetClick, cell: cell, id: w.Address}, tip: "click · enter"})
+		case htmlview.Select:
+			zs = append(zs, zone{rect: rect, act: action{kind: actWidgetMenu, cell: cell, id: w.Address}, tip: "choose · enter, ←/→"})
+		case htmlview.Slider:
+			// One zone per column of the track: a click sets that value.
+			for dx := range w.TrackW {
+				v := w.ValueAt(w.TrackX0 + dx)
+				x := x0 + w.TrackX0 + dx
+				zs = append(zs, zone{rect: image.Rect(x, y, x+1, y+1), act: action{kind: actWidgetSet, cell: cell, id: w.Address, n: v},
+					tip: fmt.Sprintf("set to %d · ←/→", v)})
+			}
+		}
 	}
-	m.stdin.input.SetWidth(max(width-lipgloss.Width(prompt)-1, 1))
-	return lipgloss.NewStyle().Foreground(colPrimary).Bold(true).Render(prompt) + m.stdin.input.View()
+	return zs
+}
+
+// renderInputLine renders the line under the running cell: the program's
+// input line and, until the user is done, the Done button (which ends
+// both stdin and the widgets). Zones are relative to the line.
+func (m *Model) renderInputLine(i int, c *Cell, width int) (string, []zone) {
+	t := m.theme
+	lb := &lineBuilder{}
+	doneAct := action{kind: actInputDone, cell: i}
+	var done string
+	if m.liveWidgets(c) {
+		st := t.dlgBtn.Padding(0, 1)
+		if m.hovered(doneAct) {
+			st = t.dlgFocus.Padding(0, 1)
+		}
+		done = st.Render("✓ done")
+	}
+	if m.stdinCell(c) {
+		prompt := "stdin ❯ "
+		if m.in.prompt != "" {
+			prompt = m.in.prompt + " ❯ "
+		}
+		avail := max(width-lipgloss.Width(done)-1, 10)
+		var s string
+		if m.in.focus != focusStdin {
+			hint := "enter or click to type input"
+			if v := m.in.line.Value(); v != "" && !m.in.password {
+				hint = v
+			}
+			s = t.muted.Render(prompt) + t.subtle.Italic(true).Render(ansi.Truncate(hint, max(avail-lipgloss.Width(prompt), 1), "…"))
+		} else {
+			m.in.line.SetWidth(max(avail-lipgloss.Width(prompt)-1, 1))
+			s = lipgloss.NewStyle().Foreground(colPrimary).Bold(true).Render(prompt) + m.in.line.View()
+		}
+		lb.button(action{kind: actFocusStdin, cell: i}, "type input for the program · alt+i", s)
+	}
+	if done != "" {
+		// Right-aligned.
+		lb.add(strings.Repeat(" ", max(width-lb.x-lipgloss.Width(done), 1)))
+		lb.button(doneAct, "end the program's input · ctrl+d", done)
+	}
+	return lb.String(), lb.zones
 }
 
 // convertAction returns the action converting cell i to the other type,
@@ -741,16 +810,27 @@ func langTitle(kind notebook.CellType) string {
 }
 
 // renderOutputs renders the outputs of a cell, also returning the index of
-// the first result line (or -1).
-func (m *Model) renderOutputs(c *Cell, width int) ([]string, int) {
+// the first result line (or -1) and the widgets of HTML outputs, positioned
+// in the lines. live widgets are interactive, focus is focused.
+func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]string, int, []htmlview.Widget) {
 	t := m.theme
 	var out []string
+	var widgets []htmlview.Widget
 	resultAt := -1
 	for _, o := range c.outputs {
 		if (o.Kind == notebook.Result || o.Kind == notebook.ImageOut) && resultAt < 0 {
 			resultAt = len(out)
 		}
 		switch o.Kind {
+		case notebook.HTMLOut:
+			lines, ws := htmlview.Render(o.Text, htmlview.Options{
+				Width: width, Styles: m.htmlStyles, Live: live, Focus: focus, MaxImageLines: maxOutputLines - 8,
+			})
+			for _, w := range ws {
+				w.Line += len(out)
+				widgets = append(widgets, w)
+			}
+			out = append(out, lines...)
 		case notebook.Stdout:
 			out = append(out, termLines(o.Text, t.stdout, width)...)
 		case notebook.Stderr:
@@ -779,7 +859,7 @@ func (m *Model) renderOutputs(c *Cell, width int) ([]string, int) {
 			}
 		}
 	}
-	return out, resultAt
+	return out, resultAt, widgets
 }
 
 // Dialog box geometry: border (1) + padding (1 vertical, 3 horizontal).

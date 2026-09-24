@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"image"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/glamour/v2/ansi"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
@@ -54,11 +54,12 @@ const (
 )
 
 type runState struct {
-	id     int
-	cellID string
-	cancel context.CancelFunc
-	ch     chan kernel.Event
-	err    error
+	id      int
+	cellID  string
+	cancel  context.CancelFunc
+	ch      chan kernel.Event
+	err     error
+	session *htmlview.Session // front-end state of the program's HTML and widgets
 }
 
 type runEventsMsg struct {
@@ -131,7 +132,7 @@ type Model struct {
 	queue   []string
 	running *runState
 	runSeq  int
-	stdin   stdinState
+	in      progInput // the running program's input: stdin and widgets
 
 	spinner  spinner.Model
 	spinning bool
@@ -140,9 +141,11 @@ type Model struct {
 	hl       *highlighter
 	theme    theme
 	themes   themeState
-	md       *glamour.TermRenderer
-	mdStyle  ansi.StyleConfig
-	mdWidth  int
+	// htmlStyles draw HTML outputs; derived from the theme.
+	htmlStyles htmlview.Styles
+	md         *glamour.TermRenderer
+	mdStyle    ansi.StyleConfig
+	mdWidth    int
 	// infoMD renders the symbol info popup at infoMDWidth.
 	infoMD      *glamour.TermRenderer
 	infoMDWidth int
@@ -219,7 +222,7 @@ func New(opts Options) *Model {
 	m.input.Placeholder = "notebook.ipynb"
 	m.input.SetWidth(40)
 	m.picker.filter = newFilterInput()
-	m.stdin.input = newStdinInput()
+	m.in.line = newInputLine()
 
 	name := opts.Theme
 	if !ValidTheme(name) {
@@ -322,9 +325,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refilterPicker()
 			return m, cmd
 		}
-		if m.overlay == overlayNone && m.stdin.focus {
+		if m.overlay == overlayNone && m.in.focus == focusStdin {
 			var cmd tea.Cmd
-			m.stdin.input, cmd = m.stdin.input.Update(msg)
+			m.in.line, cmd = m.in.line.Update(msg)
 			return m, cmd
 		}
 		if m.overlay == overlayNone && m.mode == modeEdit {
@@ -377,10 +380,10 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker.filter, cmd = m.picker.filter.Update(msg)
 		return m, cmd
 	}
-	if m.stdin.focus {
+	if m.in.focus == focusStdin {
 		// e.g. cursor blinks
 		var cmd tea.Cmd
-		m.stdin.input, cmd = m.stdin.input.Update(msg)
+		m.in.line, cmd = m.in.line.Update(msg)
 		return m, cmd
 	}
 	return m, nil
@@ -415,11 +418,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	k := m.keys
 
 	// The running program's input takes the keys while it has the focus.
-	if m.stdin.focus && m.running != nil {
-		return m.handleStdinKey(msg)
+	if m.inputFocused() {
+		return m.handleInputKey(msg)
 	}
 	if key.Matches(msg, k.Input) && m.running != nil {
-		return m.focusStdin()
+		return m.focusStdinLine()
 	}
 	// The symbol info popup closes on any key; some are its own.
 	if m.infoKey(msg) {
@@ -693,9 +696,9 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.follow = false
 		m.offset += m.viewHeight() / 2
 	case key.Matches(msg, k.Edit):
-		if m.stdinCell(m.cur()) {
-			// The running cell: type its program's input.
-			return m.focusStdin()
+		if len(m.inputItems()) > 0 && m.cur() == m.runningCell() {
+			// The running cell: use its widgets or type its input.
+			return m.focusFirstInput()
 		}
 		m.enterEdit()
 	case key.Matches(msg, k.InsertAbove):
@@ -895,18 +898,12 @@ func (m *Model) startNext() tea.Cmd {
 		rs := &runState{id: m.runSeq, cellID: c.id, cancel: cancel, ch: make(chan kernel.Event, 1024)}
 		m.running = rs
 		src, name := c.ed.Value(), fmt.Sprintf("In[%d]", c.count)
-		// The program's stdin is a pipe fed by the input under the cell.
-		var stdin io.Reader
-		r, w, err := os.Pipe()
-		if err == nil {
-			stdin = r
-			m.stdin.start(w)
-		}
+		// The program's stdin and widget events are pipes fed by the UI.
+		rs.session = htmlview.NewSession()
+		in, closeIn := m.startInput()
 		go func() {
-			rs.err = m.k.ExecuteInput(ctx, c.id, name, src, stdin, func(e kernel.Event) { rs.ch <- e })
-			if r != nil {
-				_ = r.Close() // the program has its own copy
-			}
+			rs.err = m.k.ExecuteInput(ctx, c.id, name, src, in, func(e kernel.Event) { rs.ch <- e })
+			closeIn()
 			cancel()
 			close(rs.ch)
 		}()
@@ -943,8 +940,13 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 		return nil
 	}
 	_, c := m.cellByID(rs.cellID)
+	var cmds []tea.Cmd
 	if c != nil {
 		for _, e := range msg.events {
+			if e.Kind == kernel.Op {
+				cmds = append(cmds, m.applyOp(c, e.Text))
+				continue
+			}
 			kind := notebook.Info
 			switch e.Kind {
 			case kernel.Stdout:
@@ -959,6 +961,8 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 				kind = notebook.ImageOut
 			case kernel.Error:
 				kind = notebook.Error
+			case kernel.HTML:
+				kind = notebook.HTMLOut
 			}
 			if e.ID != "" {
 				c.setOutput(kind, e.Text, e.ID)
@@ -968,11 +972,11 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 		}
 	}
 	if !msg.done {
-		return waitRun(rs)
+		return tea.Batch(append(cmds, waitRun(rs))...)
 	}
 
 	m.running = nil
-	m.stdin.close()
+	m.in.stop()
 	if c != nil {
 		c.duration = time.Since(c.started)
 		switch {

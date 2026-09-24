@@ -1,5 +1,8 @@
 package kernel
 
+// The magics in this file (cell magics, %capture, %reset go.mod) behave
+// like GoNB's (https://github.com/janpfeifer/gonb).
+
 import (
 	"context"
 	"errors"
@@ -153,6 +156,9 @@ func (k *Kernel) resetGoMod(ctx context.Context, emit func(Event)) error {
 	}
 	if out, err := k.goCmd(ctx, "mod", "init", "gopyter.local/kernel").CombinedOutput(); err != nil {
 		return fmt.Errorf("go mod init: %v: %s", err, out)
+	}
+	if err := k.setupRuntime(ctx); err != nil {
+		return err
 	}
 	emit(Event{Kind: Info, Text: "go.mod reset"})
 	return nil

@@ -1,5 +1,6 @@
 // Package notebook reads and writes Jupyter notebooks (nbformat v4), using a
-// kernelspec compatible with GoNB so notebooks can be shared with Jupyter.
+// kernelspec compatible with GoNB (https://github.com/janpfeifer/gonb) so
+// notebooks can be shared with Jupyter.
 package notebook
 
 import (
@@ -31,6 +32,7 @@ const (
 	Result      OutputKind = "result"
 	MarkdownOut OutputKind = "markdown"
 	ImageOut    OutputKind = "image" // Text is base64 image data (PNG unless read from a notebook)
+	HTMLOut     OutputKind = "html"
 	Error       OutputKind = "error"
 	Info        OutputKind = "info"
 )
@@ -187,6 +189,9 @@ func decodeOutput(o rawOutput) []Output {
 				return []Output{{Kind: ImageOut, Text: strings.Join(strings.Fields(string(img)), "")}}
 			}
 		}
+		if h, ok := o.Data["text/html"]; ok {
+			return []Output{{Kind: HTMLOut, Text: string(h)}}
+		}
 		if t, ok := o.Data["text/plain"]; ok {
 			return []Output{{Kind: Result, Text: string(t)}}
 		}
@@ -214,6 +219,9 @@ func encodeOutput(o Output, count int) rawOutput {
 	case MarkdownOut:
 		return rawOutput{OutputType: "display_data", Metadata: map[string]any{},
 			Data: map[string]multiline{"text/markdown": text}}
+	case HTMLOut:
+		return rawOutput{OutputType: "display_data", Metadata: map[string]any{},
+			Data: map[string]multiline{"text/html": text}}
 	case ImageOut:
 		return rawOutput{OutputType: "display_data", Metadata: map[string]any{},
 			Data: map[string]multiline{imageMime(o.Text): text, "text/plain": "[image]"}}

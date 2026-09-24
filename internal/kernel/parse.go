@@ -59,6 +59,7 @@ type parsedCell struct {
 	args       []string
 	hasArgs    bool
 	parseFlags bool     // call flag.Parse() first thing in main
+	gonbMain   bool     // %% or %main: statements are main's, as in GoNB
 	exec       string   // %exec: the function main calls
 	execLine   int      // line of the %exec magic, for errors
 	test       bool     // %test: build with go test
@@ -296,7 +297,7 @@ func parseCell(cellID, name, src string) (*parsedCell, error) {
 				return nil, err
 			}
 		} else {
-			if d := parseDefine(src, c); d != nil {
+			if d := parseDefine(src, c); d != nil && !pc.gonbMain {
 				d.stmt = len(pc.stmts)
 				pc.defines = append(pc.defines, d)
 			}
@@ -323,6 +324,10 @@ func parseCell(cellID, name, src string) (*parsedCell, error) {
 
 // addMagic records a %magic line. Magics that change how the cell is
 // built are handled here; the others run as commands before the code.
+//
+// Most magics, and the cell magics, follow GoNB's special commands
+// (https://github.com/janpfeifer/gonb, see its %help), so its notebooks
+// run in gopyter.
 func (pc *parsedCell) addMagic(name string, line int, text string) error {
 	fields, err := splitArgs(text)
 	if err != nil {
@@ -334,8 +339,9 @@ func (pc *parsedCell) addMagic(name string, line int, text string) error {
 	switch head := fields[0]; {
 	case head == "%" || head == "main":
 		// GoNB: "%%" starts func main(). Statements always go to main
-		// here; what it keeps is flag parsing and per-cell arguments.
-		pc.parseFlags = true
+		// here; what it keeps is flag parsing, per-cell arguments and
+		// that main's variables don't outlive the cell.
+		pc.parseFlags, pc.gonbMain = true, true
 		if len(fields) > 1 {
 			pc.args, pc.hasArgs = fields[1:], true
 		}
@@ -423,7 +429,7 @@ func (pc *parsedCell) render(how map[*define]hoist) {
 		plain.WriteString(stmt)
 		if i == len(pc.stmts)-1 {
 			if expr, ok := displayExpr(text); ok {
-				body.WriteString("Display(\n")
+				body.WriteString("gopyterDisplay(\n")
 				body.WriteString(lineDirective(pc.name, c.line, c.col))
 				body.WriteString(expr)
 				body.WriteString(")\n")
@@ -498,6 +504,11 @@ var uninteresting = map[string]bool{
 	"Copy": true, "CopyN": true, "ReadFrom": true, "Close": true,
 	"Display": true, "DisplayMarkdown": true, "DisplayPNG": true,
 	"DisplayID": true, "DisplayMarkdownID": true,
+	// GoNB's gonbui; DisplayImage returns an error, Done a widget.
+	"DisplayHtml": true, "DisplayHTML": true, "DisplayHtmlf": true, "DisplayHTMLF": true,
+	"UpdateHtml": true, "UpdateHTML": true, "UpdateMarkdown": true,
+	"DisplayPng": true, "DisplayImage": true, "DisplaySvg": true, "DisplaySVG": true,
+	"Done":  true,
 	"print": true, "println": true, "panic": true, "close": true, "delete": true, "clear": true,
 }
 
@@ -622,7 +633,7 @@ func startsUpperOrDigitOrUnderscore(s string) bool {
 }
 
 // testArgs are the flags a %test cell runs with when none are given: the
-// cell's own tests and benchmarks, verbosely.
+// cell's own tests and benchmarks, verbosely. These defaults are GoNB's.
 func (pc *parsedCell) testArgs() []string {
 	if pc.hasArgs {
 		return pc.args

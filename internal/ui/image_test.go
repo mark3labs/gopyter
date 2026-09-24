@@ -41,7 +41,7 @@ func TestImageOutput(t *testing.T) {
 	m.width, m.height = 100, 60
 	c := m.cells[0]
 
-	lines, resultAt := m.renderOutputs(c, 80)
+	lines, resultAt, _ := m.renderOutputs(c, 80, false, "")
 	// 640×480 scaled to 80 columns: 80×60 pixels, two per line.
 	if len(lines) != 1+30 || resultAt != 1 {
 		t.Fatalf("got %d lines, result at %d", len(lines), resultAt)
@@ -69,7 +69,7 @@ func TestImageOutput(t *testing.T) {
 func TestBrokenImageOutput(t *testing.T) {
 	c := &Cell{outputs: []notebook.Output{{Kind: notebook.ImageOut, Text: "!!"}}}
 	m := New(Options{Notebook: notebook.New()})
-	lines, _ := m.renderOutputs(c, 80)
+	lines, _, _ := m.renderOutputs(c, 80, false, "")
 	if len(lines) != 1 || !strings.Contains(ansi.Strip(lines[0]), "can't show image") {
 		t.Fatalf("lines %q", lines)
 	}

@@ -16,6 +16,7 @@ require (
 	github.com/mark3labs/kit v0.113.0
 	github.com/mattn/go-runewidth v0.0.30
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/net v0.59.0
 	golang.org/x/tools v0.50.0
 )
 
@@ -120,7 +121,6 @@ require (
 	golang.org/x/crypto v0.57.0 // indirect
 	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

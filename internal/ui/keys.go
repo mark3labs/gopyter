@@ -60,7 +60,8 @@ func newKeyMap() keyMap {
 		RunInsert:  b([]string{"alt+enter"}, "alt+↵", "run & insert"),
 		Save:       b([]string{"ctrl+s"}, "^s", "save"),
 		Interrupt:  b([]string{"ctrl+c"}, "^c", "interrupt"),
-		Input:      b([]string{"alt+i"}, "alt+i", "type program input"),
+		Input:      b([]string{"alt+i"}, "alt+i", "input line"),
+		// Widgets: enter on the running cell focuses them, ⇥ moves.
 
 		Up:           b([]string{"up", "k"}, "↑/k", "up"),
 		Down:         b([]string{"down", "j"}, "↓/j", "down"),
@@ -132,9 +133,13 @@ func hint(keys, desc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
 }
 
-// stdinShort returns the footer hints while typing program input.
-func (k keyMap) stdinShort() []key.Binding {
-	return []key.Binding{hint("↵", "send line"), hint("^d", "end input"), hint("esc", "leave"), k.Interrupt}
+// inputShort returns the footer hints while the program's input has the
+// focus: its input line, or a widget.
+func (k keyMap) inputShort(line bool) []key.Binding {
+	if line {
+		return []key.Binding{hint("↵", "send line"), hint("⇥", "next"), hint("^d", "done"), hint("esc", "leave"), k.Interrupt}
+	}
+	return []key.Binding{hint("←/→", "change"), hint("↵", "press/choose"), hint("⇥", "next"), hint("^d", "done"), hint("esc", "leave")}
 }
 
 // vimNormalShort returns the footer hints for vim normal mode.
@@ -186,7 +191,12 @@ func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 
 func (k keyMap) baseHelp() []helpSection {
 	return []helpSection{
-		{"Running", []key.Binding{k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Input, k.Restart}},
+		// The widget keys (←/→, ⇥...) are in the footer while one has the
+		// focus.
+		{"Running", []key.Binding{
+			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart,
+			hint("↵", "use widgets"), k.Input, hint("^d", "done (input)"),
+		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
 		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},

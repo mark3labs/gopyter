@@ -13,6 +13,7 @@ import (
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/termimg"
@@ -70,6 +71,61 @@ func renderImage(b64 string, draw bool) string {
 	return strings.Join(termimg.Render(img, 100, 40), "\n")
 }
 
+// htmlStyles draw HTML outputs; widgets are drawn inactive.
+var htmlStyles = htmlview.Styles{
+	Text:        outStyle,
+	Heading:     labelStyle,
+	Code:        resultStyle,
+	Link:        resultStyle.Underline(true),
+	Muted:       codeStyle,
+	Button:      lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7")).Background(lipgloss.Color("#3F3F46")),
+	ButtonFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7")).Background(lipgloss.Color("#3F3F46")),
+	ButtonOff:   lipgloss.NewStyle().Foreground(lipgloss.Color("#A1A1AA")).Background(lipgloss.Color("#27272A")),
+	Accent:      labelStyle,
+}
+
+func renderHTML(s string, tty bool) string {
+	lines, _ := htmlview.Render(s, htmlview.Options{Width: 100, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty})
+	return strings.Join(lines, "\n")
+}
+
+// events feeds a program's widgets: nobody can use them here, so they
+// are done at once, but requests (like dom.GetInnerHtml) are answered.
+type events struct {
+	r, w    *os.File
+	session *htmlview.Session
+}
+
+func newEvents() *events {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return &events{session: htmlview.NewSession()}
+	}
+	_, _ = io.WriteString(w, htmlview.DoneEvent) // fits the pipe's buffer
+	return &events{r: r, w: w, session: htmlview.NewSession()}
+}
+
+func (e *events) reader() io.Reader {
+	if e.r == nil {
+		return nil
+	}
+	return e.r
+}
+
+func (e *events) reply(b []byte) {
+	if e.w != nil && b != nil {
+		_, _ = e.w.Write(b) // the program may be gone
+	}
+}
+
+func (e *events) close() {
+	for _, f := range []*os.File{e.w, e.r} {
+		if f != nil {
+			_ = f.Close()
+		}
+	}
+}
+
 // Run executes all code cells of nb, storing outputs in the notebook and
 // printing them to w. Programs read stdin (nil for no input). It returns
 // the number of failed cells.
@@ -110,8 +166,10 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 		}
 		// Program output that styles itself (escape codes) is passed
 		// through: write adapts its colors to w.
+		bl := newBlocks(w, tty)
 		rawOut := false
 		stream := func(st lipgloss.Style, text string) {
+			bl.other()
 			rawOut = rawOut || strings.Contains(text, "\x1b")
 			if rawOut {
 				write(w, text)
@@ -119,21 +177,32 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 				write(w, paint(st, text))
 			}
 		}
-		// The last output block printed, if it was an updatable one, and
-		// its height: an update with the same id redraws it.
-		var lastID string
-		var lastLines int
-		block := func(text, id string) {
-			if tty && id != "" && id == lastID {
-				write(w, fmt.Sprintf("\x1b[%dA\r\x1b[J", lastLines))
+		// rich stores a rich output and prints it.
+		rich := func(kind notebook.OutputKind, text, id string) {
+			appendOut(kind, text, id)
+			i := len(c.Outputs) - 1
+			for j := range c.Outputs {
+				if id != "" && c.Outputs[j].ID == id {
+					i = j
+				}
 			}
-			writeln(w, text)
-			lastID, lastLines = id, strings.Count(text, "\n")+1
+			bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], tty), id != "", true)
 		}
+		ev := newEvents()
 		start := time.Now()
-		err := k.ExecuteInput(ctx, c.ID, name, c.Source, stdin, func(e kernel.Event) {
-			if e.ID == "" {
-				lastID = ""
+		err := k.ExecuteInput(ctx, c.ID, name, c.Source, kernel.Input{Stdin: stdin, Events: ev.reader()}, func(e kernel.Event) {
+			if e.Kind == kernel.Op {
+				r := ev.session.Apply(c.Outputs, e.Text)
+				if r.Changed {
+					for i := range r.Outputs {
+						if r.Outputs[i].Text != c.Outputs[i].Text {
+							bl.show(outputKey(r.Outputs, i), renderOutput(r.Outputs[i], tty), r.Outputs[i].ID != "", false)
+						}
+					}
+					c.Outputs = r.Outputs
+				}
+				ev.reply(r.Reply)
+				return
 			}
 			switch e.Kind {
 			case kernel.Stdout:
@@ -143,21 +212,24 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 				appendOut(notebook.Stderr, e.Text, "")
 				stream(stderrStyle, e.Text)
 			case kernel.Result:
-				appendOut(notebook.Result, e.Text, e.ID)
-				block(paint(resultStyle, "=> "+e.Text), e.ID)
+				rich(notebook.Result, e.Text, e.ID)
 			case kernel.Markdown:
-				appendOut(notebook.MarkdownOut, e.Text, e.ID)
-				block(renderMarkdown(e.Text), e.ID)
+				rich(notebook.MarkdownOut, e.Text, e.ID)
 			case kernel.Image:
-				appendOut(notebook.ImageOut, e.Text, e.ID)
-				block(renderImage(e.Text, tty), e.ID)
+				rich(notebook.ImageOut, e.Text, e.ID)
+			case kernel.HTML:
+				rich(notebook.HTMLOut, e.Text, e.ID)
 			case kernel.Error:
+				bl.other()
 				appendOut(notebook.Error, e.Text, "")
 				writeln(w, paint(errStyle, e.Text))
 			case kernel.Info:
+				bl.other()
 				writeln(w, codeStyle.Render("› "+e.Text))
 			}
 		})
+		ev.close()
+		bl.finish()
 		if err != nil {
 			failed++
 			if !errors.Is(err, kernel.ErrCompile) {

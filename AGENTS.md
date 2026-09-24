@@ -23,10 +23,25 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/termimg`  | draws images as half-block text for image outputs (TUI and `run`)        |
+| `internal/htmlview` | draws HTML outputs as text with widgets; applies the program's DOM/widget ops (`Session`) |
+| `internal/kernel/runtime` | packages cell programs import: `nb` (gopyter's API) and the GoNB shim (`gonbui`, `widgets`, `comms`, `dom`, `protocol`, adapted from GoNB under its MIT license); stdlib only |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
 | `internal/lsp`      | minimal JSON-RPC/LSP client (stdio)                                       |
 | `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup |
 | `scripts`           | tests for `install.sh` (run against a fake release; checked against `.goreleaser.yaml`) |
+
+### Credit to GoNB
+
+gopyter borrows from [GoNB](https://github.com/janpfeifer/gonb) (Jan Pfeifer,
+MIT license): its execution model, notebook format, cell commands and the
+`gonbui` packages. Keep that visible:
+
+- `internal/kernel/runtime/gonb/LICENSE` is GoNB's license: keep it with the
+  shim. Code or documentation adapted from GoNB goes there, and each package
+  comment says what it's adapted from, with a link.
+- When adding a feature that follows GoNB, say so where it's documented
+  (README, `%help`, comments) and link to the project. The README's
+  Acknowledgements section lists what gopyter borrows; update it too.
 
 ## Setup and commands
 
@@ -90,22 +105,42 @@ concatenation in WriteString") count as issues to fix too.
 - A cell's declarations only replace earlier ones after a successful build.
 - `Execute` serializes calls to `emit`. Callers may assume `emit` is never
   called concurrently.
-- Rich output (`Display`, `DisplayMarkdown`, `DisplayPNG`, `DisplayID`,
-  `DisplayMarkdownID`) goes over file descriptor 3 as JSON lines. Windows
-  falls back to stdout. `Display` sends an `image.Image` as base64
-  `image/png` (the `Image` event, `ImageOut` output); the UI decodes and
-  draws it with `termimg` when rendering outputs (cached with the other
-  output lines). Events with an `ID` replace the output with that ID
+- Cell programs import runtime packages from `internal/kernel/runtime`:
+  `nb` (`github.com/mark3labs/gopyter/nb`, with `nb/wire`, the transport)
+  and the GoNB shim (`github.com/janpfeifer/gonb/gonbui/...`). They're
+  embedded and written into the workspace as two local modules, which its
+  `go.mod` requires through `replace` (`setupRuntime`, also after `%reset
+  go.mod`); their repository import paths are rewritten (`rewriteImports`).
+  They must stay stdlib-only (the workspace is offline) and are vetted and
+  linted with the rest of the repo. `generate` adds imports for them when a
+  cell uses `nb.`, `widgets.`... (`seedImports`), and declares the old
+  top-level names (`Display`, `Cache`...) only when the notebook doesn't
+  (`compatAliases`). The helper file (`helpersSrc`) is internal: trailing
+  expressions call `gopyterDisplay`.
+- Rich output goes over file descriptor 3 as JSON lines:
+  `{"mime","data","id"}` displays (`Result`, `Markdown`, `Image`, `HTML`
+  events) and `{"op":...}` operations (`Op` events, raw JSON: DOM changes,
+  widget values, input requests, requests awaiting a reply). Events go back
+  to the program on file descriptor 4 (`Input.Events`): `{"address",
+  "value"}` and `{"done":true}`; its end means done too. Windows falls back
+  to stdout. Events with an `ID` replace the output with that ID
   (`Cell.setOutput`); the ID isn't saved to the notebook.
+- `htmlview.Session` applies `Op`s to a cell's outputs (HTML outputs are
+  kept as serialized HTML and re-parsed per change) and produces replies.
+  The UI and `runner` both use it; the runner sends `done` at once.
 - Magics that change how a cell is built (`%%`/`%main` args, `%exec`,
   `%test`) are parsed in `parseCell` (`addMagic`); the others run as
   commands before the code (`runCommand`, `magic.go`). Cell magics
   (`%%writefile`, `%%bash`...) must be the first line and make the whole
   cell a command. `%test` cells build `main_test.go` with `go test -c`;
   only one of `main.go`/`main_test.go` may exist.
-- `ExecuteInput` takes the program's stdin. The UI feeds it from a pipe
-  (`stdin.go`): the input line under the running cell writes to it and
-  `ctrl+d` closes it.
+- `ExecuteInput` takes the program's `Input` (stdin and widget events).
+  The UI feeds both from pipes (`input.go`): the input line under the
+  running cell, the widgets drawn in its HTML outputs (`Cell.outWidgets`,
+  laid out by `htmlview.Render`) and the Done button. `m.in.focus` is the
+  focused item (`focusStdin` or a widget's address); `tab` cycles through
+  `inputItems`. Widget mouse actions (`actWidgetClick`, `actWidgetSet`,
+  `actWidgetMenu`) and keys call the same functions.
 - `CompletionSource` mirrors a cell into a separate `gopyter_complete`
   sub-package. It copies chunks verbatim at their original columns, so cursor
   positions map back exactly. Preserve that property.
@@ -190,6 +225,11 @@ concatenation in WriteString") count as issues to fix too.
   `dialog_test.go` for patterns, including running returned `tea.Cmd`s
   synchronously.
 - Kernel tests compile real programs, so they need `go` but no network.
+- `TestExamples` (`internal/runner`) runs every notebook in `examples/`
+  headlessly (skipped with `-short`). Examples must stay offline (stdlib
+  and gopyter's runtime only), write files only under relative paths, and
+  finish without input (widgets are done at once, stdin may be empty).
+  Save them through gopyter (or `notebook.Save`) so the format matches.
   Completion tests start a real `gopls` and skip when it isn't installed.
 - Add or update tests for any behavior change, and add a regression test when
   fixing a bug.

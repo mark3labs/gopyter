@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 )
 
 // themeState holds the active theme and the theme picker.
@@ -62,7 +63,19 @@ func (m *Model) applyTheme(name string) {
 	is.Blurred.Placeholder = lipgloss.NewStyle().Foreground(colSubtle)
 	m.input.SetStyles(is)
 	m.picker.filter.SetStyles(is)
-	m.stdin.input.SetStyles(is)
+	m.in.line.SetStyles(is)
+
+	m.htmlStyles = htmlview.Styles{
+		Text:        m.theme.text,
+		Heading:     lipgloss.NewStyle().Foreground(colPrimary),
+		Code:        lipgloss.NewStyle().Foreground(colInfo),
+		Link:        lipgloss.NewStyle().Foreground(colPrimary).Underline(true),
+		Muted:       m.theme.muted,
+		Button:      m.theme.dlgBtn.Padding(0),
+		ButtonFocus: m.theme.dlgFocus.Padding(0),
+		ButtonOff:   lipgloss.NewStyle().Foreground(colMuted).Background(colFaint),
+		Accent:      lipgloss.NewStyle().Foreground(colPrimary),
+	}
 
 	// Rendered markdown and outputs are cached with their styles baked in.
 	for _, c := range m.cells {

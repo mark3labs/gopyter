@@ -51,7 +51,8 @@ const cellRules = `How cells work:
 - A top-level "x := ..." also stays available to later cells.
 - A trailing bare expression is displayed as the cell's result.
 - Standard library imports are added automatically when a package is used, so an import line is optional.
-- Display(v) and DisplayMarkdown(s) show rich output. Display draws an image.Image as a picture; DisplayPNG(data) shows PNG bytes. DisplayID(id, v) and DisplayMarkdownID(id, s) replace their earlier output with the same id (animations, progress).
+- Rich output comes from package nb, used without an import: nb.Display(v) (draws an image.Image as a picture), nb.DisplayMarkdown(s), nb.DisplayPNG(data), and nb.DisplayID(id, v) / nb.DisplayMarkdownID(id, s), which replace their earlier output with the same id (animations, progress). nb.Cache/nb.CacheErr compute a value once per kernel.
+- For interaction, GoNB's widgets work: import "github.com/janpfeifer/gonb/gonbui/widgets", e.g. s := widgets.Slider(0, 100, 50).Done(); for v := range s.Listen().C { ... }. The loop ends when the user presses Done.
 - Lines starting with ! are shell commands and lines starting with % are magics (e.g. %test runs the cell's Test functions with go test). A first line starting with %% (%%writefile, %%bash) makes the whole cell a file or script, not Go. Keep them as they are.
 - Error positions look like In[3]:2:5 (cell, line, column).
 

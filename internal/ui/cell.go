@@ -7,6 +7,7 @@ import (
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
@@ -46,19 +47,22 @@ type Cell struct {
 	outKey      outputKey
 	outLines    []string
 	outResultAt int
+	outWidgets  []htmlview.Widget // widgets of HTML outputs, positioned in outLines
 	// outRev counts changes to outputs, which aren't always appends:
 	// DisplayID replaces an output in place.
 	outRev int
 }
 
-// outputKey fingerprints the outputs.
+// outputKey fingerprints the outputs, and how their widgets are drawn.
 type outputKey struct {
 	width, n, last, rev int
 	kind                notebook.OutputKind
+	focus               string
+	live                bool
 }
 
-func (c *Cell) outputFingerprint(width int) outputKey {
-	k := outputKey{width: width, n: len(c.outputs), rev: c.outRev}
+func (c *Cell) outputFingerprint(width int, focus string, live bool) outputKey {
+	k := outputKey{width: width, n: len(c.outputs), rev: c.outRev, focus: focus, live: live}
 	if k.n > 0 {
 		k.last = len(c.outputs[k.n-1].Text)
 		k.kind = c.outputs[k.n-1].Kind

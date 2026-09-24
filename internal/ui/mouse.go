@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
@@ -46,6 +47,10 @@ const (
 	actCopyOutput
 	actFixCell     // ask the AI to fix the cell's error
 	actFocusStdin  // type input for the running program
+	actInputDone   // end the running program's input
+	actWidgetClick // click a button widget (action.id is its address)
+	actWidgetSet   // set a slider or select (action.id) to action.n
+	actWidgetMenu  // list a select's options (action.id)
 	actAskCell     // ask the AI to change the cell
 	actAddCode     // insert a code cell at index action.cell
 	actAddMarkdown // insert a markdown cell at index action.cell
@@ -75,6 +80,8 @@ const (
 type action struct {
 	kind actionKind
 	cell int
+	id   string // a widget's address
+	n    int    // a widget value
 }
 
 // zone is a clickable screen region.
@@ -258,9 +265,8 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	}
 	m.closeInfo()
 	// A click elsewhere leaves the program input (a click on it refocuses).
-	if m.stdin.focus {
-		m.stdin.focus = false
-		m.stdin.input.Blur()
+	if m.in.focus != "" {
+		m.blurInput()
 	}
 
 	if m.comp.open {
@@ -595,7 +601,15 @@ func (m *Model) doAction(a action) tea.Cmd {
 	case actRunSelected:
 		return m.runSelected(false, false)
 	case actFocusStdin:
-		return m.focusStdin()
+		return m.focusStdinLine()
+	case actInputDone:
+		return m.endInput()
+	case actWidgetClick:
+		return m.clickWidget(a.id)
+	case actWidgetSet:
+		return m.setWidget(a.id, a.n)
+	case actWidgetMenu:
+		return m.openWidgetMenu(a.id)
 	case actRunAll:
 		return m.runAll()
 	case actInterrupt:
@@ -750,12 +764,15 @@ func (m *Model) doAction(a action) tea.Cmd {
 func plainOutput(c *Cell) string {
 	var b strings.Builder
 	for _, o := range c.outputs {
-		if o.Kind == notebook.ImageOut {
-			b.WriteString("[image]\n") // base64 would be useless as text
-			continue
+		text := o.Text
+		switch o.Kind {
+		case notebook.ImageOut:
+			text = "[image]" // base64 would be useless as text
+		case notebook.HTMLOut:
+			text = htmlview.Text(text)
 		}
-		b.WriteString(o.Text)
-		if !strings.HasSuffix(o.Text, "\n") {
+		b.WriteString(text)
+		if !strings.HasSuffix(text, "\n") {
 			b.WriteByte('\n')
 		}
 	}

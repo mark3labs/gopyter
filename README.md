@@ -2,6 +2,11 @@
 
 A Jupyter-style notebook for **Go** that runs in your terminal.
 
+gopyter builds on the work of [GoNB](https://github.com/janpfeifer/gonb), the Go
+kernel for Jupyter by Jan Pfeifer: it runs cells the same way, shares its
+notebook format and cell commands, and implements its `gonbui` API and widgets,
+so GoNB notebooks run in gopyter too. See [Acknowledgements](#acknowledgements).
+
 ```
  ◆ gopyter   hello.ipynb ●                                        gopls  │  go1.27.1  │  ● idle
 ── ▶ run ─ ▶▶ run all ─ ■ stop ─ ↻ restart ───┼─ + code ─ + markdown ───┼─ save ─ ◐ theme ─ ? help ─
@@ -23,7 +28,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
 - **Symbol info.** `alt+k` (or `K` in vim) shows the signature and docs of the function, type or variable under the cursor
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
-- **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter
+- **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter, and GoNB notebooks (cell commands, `gonbui`, widgets) run in gopyter
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
 - **Live reload.** Edits made to the notebook file by other programs show up automatically
@@ -72,7 +77,19 @@ gopyter hello.ipynb     # opens (or creates) a notebook, in edit mode
    one, `m` turns a cell into markdown, `dd` deletes, and `?` shows every shortcut.
 4. **`ctrl+s`** saves; **`q`** quits.
 
-For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cells.
+For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all
+cells. More example notebooks show off the rest:
+
+| Notebook                     | Shows                                                        |
+|------------------------------|--------------------------------------------------------------|
+| `examples/tour.ipynb`        | the basics: declarations, results, markdown, streaming       |
+| `examples/images.ipynb`      | images, animation with `nb.DisplayID`, Game of Life, plotting |
+| `examples/terminal.ipynb`    | colors, progress bars, full-screen animation, reading input  |
+| `examples/data.ipynb`        | variables across cells, tables, charts, HTML, `nb.Cache`     |
+| `examples/widgets.ipynb`     | sliders, buttons and selects driving live output             |
+| `examples/magics.ipynb`      | `!` commands, `%%writefile`, `%%sh`, flags, `%test`, `%goflags` |
+
+They run headless too: `gopyter run examples/images.ipynb`.
 
 ## How cells run
 
@@ -95,35 +112,59 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
   `f := func(...) {...}` becomes a persisted declaration. Variables inside
   blocks (`for`, `if`, ...) stay local.
 - A persisted `var` is re-initialized in every later cell (each cell is a new
-  process). To compute an expensive value once, wrap it in `Cache` or
-  `CacheErr`, which store the result (gob-encoded, so exported fields only) in
-  the kernel workspace:
+  process). To compute an expensive value once, wrap it in `nb.Cache` or
+  `nb.CacheErr`, which store the result (gob-encoded, so exported fields only)
+  in the kernel workspace:
 
   ```go
-  var resp, err = CacheErr("resp", func() (*jev.Response, error) {
+  var resp, err = nb.CacheErr("resp", func() (*jev.Response, error) {
       return client.SystemOne(ctx, msg, criteria)
   })
   ```
 
   `CacheErr` does not store failed results. `%cache clear resp` forces a recompute.
 - Imports are added automatically, and third-party modules are fetched on first use.
-- `Display(v...)` and `DisplayMarkdown(s)` produce rich output.
-- Images are drawn in the output: `Display` an `image.Image` (or end the cell
-  with one), or pass PNG bytes to `DisplayPNG(data)`. They are drawn with
+
+## Rich output
+
+gopyter's API is package `nb` (`github.com/mark3labs/gopyter/nb`), which cells
+use without importing it:
+
+| Function                        | Shows                                          |
+|---------------------------------|------------------------------------------------|
+| `nb.Display(v...)`              | values; an `image.Image` is drawn              |
+| `nb.DisplayMarkdown(s)`         | rendered markdown                              |
+| `nb.DisplayPNG(data)`           | PNG bytes                                      |
+| `nb.DisplayID(id, v...)`        | like `Display`, replacing the last output with the same id |
+| `nb.DisplayMarkdownID(id, s)`   | like `DisplayMarkdown`, replacing by id        |
+| `nb.Cache`, `nb.CacheErr`       | (see above)                                    |
+
+A cell's trailing expression is displayed too. Notebooks written before `nb`
+can keep calling `Display`, `DisplayMarkdown`, `Cache`, ... without the `nb.`
+prefix: gopyter still declares these names, but only when the notebook doesn't
+declare them itself, so a notebook can have its own `Display`.
+
+- Images are drawn in the output: `nb.Display` an `image.Image` (or end the
+  cell with one), or pass PNG bytes to `nb.DisplayPNG(data)`. They are drawn with
   colored half blocks (two pixels per character), scaled to fit the cell, and
   saved in the notebook as `image/png`, so Jupyter shows them too. Images in
   notebooks from Jupyter (PNG, JPEG, GIF) are shown as well. `gopyter run`
   draws them when its output is a color terminal and prints `[image WxH]`
   otherwise.
-- `DisplayID(id, v...)` and `DisplayMarkdownID(id, s)` replace the output they
-  showed earlier with the same id, for animations and progress.
+- `nb.DisplayID(id, v...)` and `nb.DisplayMarkdownID(id, s)` replace the output
+  they showed earlier with the same id, for animations and progress.
 - Program output keeps its colors, and is shown like a terminal would show it:
   `\r`, cursor movement and clearing the screen work, so progress bars and
   redrawing demos look right.
 - Programs can read their standard input. While a cell runs, an input line
   appears under it: press `enter` on the cell (or `alt+i`, or click it), type,
-  and press `enter` to send a line or `ctrl+d` to end the input. `gopyter run`
+  and press `enter` to send a line or `ctrl+d` to end the input (see
+  [Widgets](#widgets-and-gonb-notebooks) for what else it ends). `gopyter run`
   passes its own standard input to the programs.
+
+Cells can also hold commands and magics. Most follow
+[GoNB](https://github.com/janpfeifer/gonb)'s special commands and behave the
+same way:
 
 | Cell command     | Effect                                        |
 |------------------|-----------------------------------------------|
@@ -160,6 +201,56 @@ can read what `%%writefile` wrote. Commands can also be written as
 unchanged. Each cell can have its own `func init()`; GoNB's `init_xxx()`
 functions work too.
 
+## Widgets and GoNB notebooks
+
+gopyter implements [GoNB](https://github.com/janpfeifer/gonb)'s notebook
+packages (`gonbui`, `widgets`, `comms`, `dom`), adapted from GoNB's own, so GoNB
+notebooks run unchanged and cells can use its widgets. GoNB draws them in
+Jupyter with HTML and JavaScript; gopyter draws them in the terminal:
+
+```go
+import "github.com/janpfeifer/gonb/gonbui/widgets"
+
+%%
+iters := widgets.Slider(10, 500, 100).Done()
+for n := range iters.Listen().LatestOnly().C {
+    nb.DisplayID("fractal", Mandelbrot(320, 240, n)) // your own func
+}
+```
+
+- **Widgets**: `widgets.Button`, `widgets.Slider` and `widgets.Select`, with
+  GoNB's builder API (`Done`, `Listen`, `Value`, `SetValue`, `AppendTo`...).
+  They are drawn in the cell's output while it runs. Press `enter` on the
+  running cell to focus the first one and `tab` to move between them and the
+  input line. `←`/`→` move a slider (`pgup`/`pgdown` by 10%) or change a
+  select, and `enter` presses a button or lists a select's options. The mouse
+  works too: click a slider's track, a button, or a select.
+- **Done**: the `✓ done` button under the cell (or `ctrl+d`) tells the program
+  the user is done. It closes every `Listen` channel, so `for v := range
+  ch.C` loops end, and ends stdin. Interrupting (`ctrl+c`) stops the program
+  instead. With `gopyter run` nobody can use the widgets, so they are done at
+  once.
+- **`gonbui`**: `DisplayHTML`, `DisplayMarkdown`, `DisplayImage`, `UpdateHTML`
+  and `UpdateMarkdown` (updatable by id), `RequestInput` (focuses the input
+  line, hidden for passwords), `EmbedImageAsPNGSrc`...
+- **HTML** output is drawn as text: formatting, headings, lists, tables,
+  preformatted text and `data:` images; styles and scripts are ignored, SVG
+  shows a placeholder. It's saved as `text/html`, so Jupyter shows the real
+  thing.
+- **`dom`** changes displayed HTML by element id (`Append`, `SetInnerHtml`,
+  `SetInnerText`, `GetInnerHtml`, `Remove`...), and **`comms`** exchanges
+  values with the front-end by address (`Listen`, `Send`, `ReadValue`).
+- JavaScript can't run in a terminal: `dom.TransientJavascript` is ignored,
+  script loaders return an error, and `gonbui/plotly` and `%wasm` aren't
+  available.
+
+These packages ship with gopyter and need no download: the kernel workspace's
+`go.mod` points `github.com/janpfeifer/gonb` and `github.com/mark3labs/gopyter`
+at local copies. They are gopyter's implementation, not GoNB itself: things
+that need a browser are missing (see above), and the rest may differ in
+details. In a cell starting with `%%`,
+as in GoNB, variables stay in that cell.
+
 ## Keys
 
 gopyter is modal like Jupyter: **command mode** (blue) works on cells, **edit
@@ -172,6 +263,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `ctrl+j` or `ctrl+enter`     | run cell                                 |
 | `A` / `R` / `ctrl+c`         | run all / restart kernel / interrupt     |
 | `alt+i`                      | type input for the running program       |
+| `enter` on a running cell    | focus its widgets (`tab` next, `ctrl+d` done) |
 | `j` `k` `g` `G`              | move selection                           |
 | `a` / `b`                    | insert cell above / below                |
 | `dd` / `z`                   | delete / undo delete                     |
@@ -310,6 +402,10 @@ gopyter run notes.ipynb --fail-fast
 ```
 
 It exits non-zero if any cell fails, so it works as a CI check for notebooks.
+On a terminal, outputs that update (`nb.DisplayID`, `gonbui.UpdateHTML`, DOM
+changes) are redrawn in place. When the output isn't a terminal, they're
+printed once, in their final state, when the cell ends, so logs don't get a
+line per animation frame.
 
 ## Editing outside gopyter
 
@@ -320,6 +416,30 @@ it asks first. **Reload** loads the file and discards your changes. **Keep
 mine** (or `esc`) keeps your version, and the next save overwrites the file.
 Reloading doesn't reset the kernel, so declarations from cells you already ran
 stay in effect. External edits to cell text can be undone.
+
+## Acknowledgements
+
+gopyter owes a lot to [GoNB](https://github.com/janpfeifer/gonb), the Go
+kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):
+
+- **How cells run.** Like GoNB, gopyter keeps each cell's declarations, writes a
+  Go program with a `main()` for the statements, builds it with `go build` and
+  runs it. Compile errors are mapped back to cell lines.
+- **Notebook format.** Notebooks use GoNB's kernelspec, so the same files open
+  in Jupyter with GoNB.
+- **Cell commands.** `!`, `%%`/`%main`, `%args`, `%env`, `%exec`, `%test`,
+  `%goflags`, `%capture`, `%autoget`, `%ls`/`%rm`, `%reset`, the cell magics
+  (`%%writefile`, `%%script`...) and `//gonb:` prefixes follow GoNB's special
+  commands, as do `init_xxx()` functions.
+- **`gonbui`, `widgets`, `comms` and `dom`.** gopyter's versions of these
+  packages keep GoNB's API and adapt its documentation, and parts of its code
+  (such as `comms.ConvertTo`), so GoNB notebooks run unchanged. They're in
+  [`internal/kernel/runtime/gonb`](internal/kernel/runtime/gonb), with GoNB's
+  MIT [license](internal/kernel/runtime/gonb/LICENSE).
+
+gopyter's own parts (the terminal UI, drawing images, HTML and widgets as text,
+the `nb` package, variables kept across cells, completion, AI) are separate
+work. To run Go notebooks in Jupyter itself, use GoNB.
 
 ## Development
 

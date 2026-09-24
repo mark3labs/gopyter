@@ -191,7 +191,7 @@ func TestDisplayIDAndStdin(t *testing.T) {
 	k := newTestKernel(t)
 	var events []Event
 	src := "sc := bufio.NewScanner(os.Stdin)\nfor i := 0; sc.Scan(); i++ {\n\tDisplayID(\"line\", i, sc.Text())\n}\nDisplayMarkdownID(\"md\", \"**done**\")"
-	err := k.ExecuteInput(context.Background(), "1", "In[1]", src, strings.NewReader("a\nb\n"), func(e Event) {
+	err := k.ExecuteInput(context.Background(), "1", "In[1]", src, Input{Stdin: strings.NewReader("a\nb\n")}, func(e Event) {
 		if e.Kind != Info { // notes about sc not being kept
 			events = append(events, e)
 		}

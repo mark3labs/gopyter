@@ -75,15 +75,15 @@ func TestSetOutputReplaces(t *testing.T) {
 	c.appendOutput(notebook.Stdout, "start\n")
 	c.setOutput(notebook.Result, "1%", "p")
 	c.appendOutput(notebook.Stdout, "more\n")
-	lines, _ := m.renderOutputs(c, 60)
-	c.outLines, c.outKey = lines, c.outputFingerprint(60)
+	lines, _, _ := m.renderOutputs(c, 60, false, "")
+	c.outLines, c.outKey = lines, c.outputFingerprint(60, "", false)
 
 	c.setOutput(notebook.Result, "99%", "p")
 	if len(c.outputs) != 3 || c.outputs[1].Text != "99%" {
 		t.Fatalf("outputs %+v", c.outputs)
 	}
 	// The render cache sees the change even though the last output didn't.
-	if c.outputFingerprint(60) == c.outKey {
+	if c.outputFingerprint(60, "", false) == c.outKey {
 		t.Fatal("fingerprint unchanged after an update")
 	}
 	if got := plainLines(m.renderCell(0, 80).lines); !strings.Contains(strings.Join(got, "\n"), "99%") {
@@ -120,8 +120,8 @@ func runCell(t *testing.T, src string, input ...string) (*Model, *Cell) {
 	}
 	// enter on the running cell focuses its input.
 	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !m.stdin.focus || m.mode != modeCommand {
-		t.Fatalf("enter should focus the input: focus=%v mode=%v", m.stdin.focus, m.mode)
+	if m.in.focus != focusStdin || m.mode != modeCommand {
+		t.Fatalf("enter should focus the input: focus=%q mode=%v", m.in.focus, m.mode)
 	}
 	for _, line := range input {
 		for _, r := range line {
@@ -130,7 +130,7 @@ func runCell(t *testing.T, src string, input ...string) (*Model, *Cell) {
 		m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
 	}
 	m.handleKey(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	if m.stdin.open || m.stdin.focus {
+	if m.in.stdin != nil || m.in.focus != "" || !m.in.done {
 		t.Fatal("ctrl+d should end the input")
 	}
 	for m.running != nil {
