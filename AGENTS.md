@@ -36,8 +36,10 @@ gopyter borrows from [GoNB](https://github.com/janpfeifer/gonb) (Jan Pfeifer,
 MIT license): its execution model, notebook format, cell commands and the
 `gonbui` packages. Keep that visible:
 
+- gopyter itself is MIT-licensed (`LICENSE`).
 - `internal/kernel/runtime/gonb/LICENSE` is GoNB's license: keep it with the
-  shim. Code or documentation adapted from GoNB goes there, and each package
+  shim. Release archives ship it as `third_party/gonb/LICENSE`
+  (`.goreleaser.yaml`). Code or documentation adapted from GoNB goes there, and each package
   comment says what it's adapted from, with a link.
 - When adding a feature that follows GoNB, say so where it's documented
   (README, `%help`, comments) and link to the project. The README's

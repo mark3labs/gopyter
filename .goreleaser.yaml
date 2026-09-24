@@ -29,6 +29,12 @@ archives:
   - formats: [tar.gz]
     files:
       - README.md
+      - LICENSE
+      # GoNB's license, for the gonbui packages adapted from it (embedded
+      # in the binary). dst is a directory: the file keeps its name.
+      - src: internal/kernel/runtime/gonb/LICENSE
+        dst: third_party/gonb
+        strip_parent: true
 
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"

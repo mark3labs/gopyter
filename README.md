@@ -453,3 +453,11 @@ go build -tags noai .      # without AI support: no kit dependency, a much small
 See [AGENTS.md](AGENTS.md) for the architecture, conventions and testing
 workflow. Releases are cut by pushing a `v*` tag; GoReleaser builds and
 publishes the binaries.
+
+## License
+
+gopyter is released under the [MIT License](LICENSE). The GoNB compatibility
+packages in [`internal/kernel/runtime/gonb`](internal/kernel/runtime/gonb) are
+adapted from [GoNB](https://github.com/janpfeifer/gonb), also under the MIT
+License: see [its license](internal/kernel/runtime/gonb/LICENSE), which release
+archives include as `third_party/gonb/LICENSE`.
