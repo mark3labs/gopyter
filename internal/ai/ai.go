@@ -33,26 +33,30 @@ type Cell struct {
 	Source string
 }
 
-// FixRequest describes a failing cell.
-type FixRequest struct {
+// Request describes a cell for the model to change: a failing cell to fix,
+// or any code cell to edit as Instruction says.
+type Request struct {
 	CellID string
 	Name   string // as in error positions, e.g. "In[3]"
-	Source string
-	Error  string // the error output of the cell's last run
-	// Before are the code cells above the failing one, oldest first.
+	Source string // may be empty when editing: the model writes the cell
+	// Error is the error output of the cell's last run, if it failed.
+	Error string
+	// Instruction is what the user asked for. Fixes don't have one.
+	Instruction string
+	// Before are the code cells above this one, oldest first.
 	Before []Cell
 	// Declarations are the identifiers the kernel currently knows.
 	Declarations []string
 	GoVersion    string
 }
 
-// Fix is a corrected cell proposed by the model.
-type Fix struct {
+// Proposal is a new version of a cell proposed by the model.
+type Proposal struct {
 	Source      string
 	Explanation string
 	// Missing lists imported packages whose modules aren't downloaded
-	// yet, so the fix is only checked up to its imports. Running the cell
-	// downloads them.
+	// yet, so the proposal is only checked up to its imports. Running the
+	// cell downloads them.
 	Missing []string
 }
 

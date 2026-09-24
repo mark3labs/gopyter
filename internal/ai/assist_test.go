@@ -84,14 +84,14 @@ func (m *scriptedModel) firstPrompt() string {
 	return b.String()
 }
 
-// submitReply is a model turn that calls submit_fix.
+// submitReply is a model turn that calls submitTool.
 func submitReply(id, source, explanation string) []fantasy.StreamPart {
 	in, _ := json.Marshal(submitInput{Source: source, Explanation: explanation})
 	return []fantasy.StreamPart{
-		{Type: fantasy.StreamPartTypeToolInputStart, ID: id, ToolCallName: "submit_fix"},
+		{Type: fantasy.StreamPartTypeToolInputStart, ID: id, ToolCallName: submitTool},
 		{Type: fantasy.StreamPartTypeToolInputDelta, ID: id, Delta: string(in)},
 		{Type: fantasy.StreamPartTypeToolInputEnd, ID: id},
-		{Type: fantasy.StreamPartTypeToolCall, ID: id, ToolCallName: "submit_fix", ToolCallInput: string(in)},
+		{Type: fantasy.StreamPartTypeToolCall, ID: id, ToolCallName: submitTool, ToolCallInput: string(in)},
 		{Type: fantasy.StreamPartTypeFinish, FinishReason: fantasy.FinishReasonToolCalls},
 	}
 }
@@ -133,7 +133,7 @@ func newScripted(t *testing.T, replies ...[]fantasy.StreamPart) (*Assistant, *sc
 	return a, m
 }
 
-var failing = FixRequest{
+var failing = Request{
 	CellID: "c3", Name: "In[3]",
 	Source:       "fmt.Println(nme)",
 	Error:        "In[3]:1:13: undefined: nme",
@@ -179,12 +179,12 @@ func TestFixRetriesUntilItCompiles(t *testing.T) {
 
 func TestFixReportsMissingModules(t *testing.T) {
 	a, _ := newScripted(t, submitReply("1", "import \"example.com/x\"\nx.Y()", "use x"))
-	fix, err := a.Fix(context.Background(), failing, &fakeChecker{missing: []string{"example.com/x"}}, nil)
+	p, err := a.Fix(context.Background(), failing, &fakeChecker{missing: []string{"example.com/x"}}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(fix.Missing) != 1 || fix.Missing[0] != "example.com/x" {
-		t.Errorf("Missing = %v", fix.Missing)
+	if len(p.Missing) != 1 || p.Missing[0] != "example.com/x" {
+		t.Errorf("Missing = %v", p.Missing)
 	}
 }
 
@@ -209,6 +209,76 @@ func TestFixGivesUp(t *testing.T) {
 	}
 	if len(check.checked) > maxSteps {
 		t.Errorf("%d proposals checked, want at most %d", len(check.checked), maxSteps)
+	}
+}
+
+func TestEditRetriesUntilItCompiles(t *testing.T) {
+	a, m := newScripted(t,
+		submitReply("1", "for i := range BAD {}", "first try"),
+		submitReply("2", "for i := range 3 {\n\tfmt.Println(name, i)\n}", "Greets three times."),
+	)
+	check := &fakeChecker{}
+	req := Request{
+		CellID: "c2", Name: "In[2]", Source: `fmt.Println(name)`,
+		Instruction:  "print it three times",
+		Before:       []Cell{{Name: "In[1]", Source: `name := "gopher"`}},
+		Declarations: []string{"name"},
+	}
+	p, err := a.Edit(context.Background(), req, check, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.Source, "range 3") || p.Explanation != "Greets three times." {
+		t.Errorf("proposal = %+v", p)
+	}
+	if len(check.checked) != 2 {
+		t.Errorf("checked %d proposals, want 2", len(check.checked))
+	}
+	prompt := m.firstPrompt()
+	for _, want := range []string{"In[2]", "fmt.Println(name)", "print it three times", `name := "gopher"`} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "failed") {
+		t.Errorf("prompt mentions an error the cell doesn't have:\n%s", prompt)
+	}
+	if !strings.Contains(m.allText(), "as the user asks") {
+		t.Error("the edit system prompt is missing")
+	}
+}
+
+// TestEditEmptyCell: an empty cell is written from scratch, and an error
+// from its last run is passed on.
+func TestEditEmptyCell(t *testing.T) {
+	a, m := newScripted(t, submitReply("1", "fmt.Println(42)", "Prints 42."))
+	req := Request{CellID: "c1", Name: "In[ ]", Instruction: "print the answer", Error: "exit status 3"}
+	if _, err := a.Edit(context.Background(), req, &fakeChecker{}, nil); err != nil {
+		t.Fatal(err)
+	}
+	prompt := m.firstPrompt()
+	for _, want := range []string{"is empty", "print the answer", "exit status 3", "declares nothing yet"} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q:\n%s", want, prompt)
+		}
+	}
+}
+
+func TestEditWithoutProposal(t *testing.T) {
+	a, _ := newScripted(t, textReply("Run In[1] first: it declares name."))
+	_, err := a.Edit(context.Background(), Request{Name: "In[2]", Instruction: "use name"}, &fakeChecker{}, nil)
+	if err == nil || !strings.Contains(err.Error(), "no change proposed: Run In[1] first") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestEditNeedsInstruction(t *testing.T) {
+	a, m := newScripted(t)
+	if _, err := a.Edit(context.Background(), Request{Name: "In[1]", Instruction: "  "}, &fakeChecker{}, nil); err == nil {
+		t.Fatal("no error for an empty instruction")
+	}
+	if len(m.prompts) != 0 {
+		t.Error("the model was asked without an instruction")
 	}
 }
 

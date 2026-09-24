@@ -30,7 +30,7 @@ func newPickerModel(t *testing.T, model string, on bool) (*Model, *pickerSetup) 
 	nb := &notebook.Notebook{Cells: []*notebook.Cell{{ID: "a", Type: notebook.Code, Source: "x := 1"}}}
 	m := New(Options{Notebook: nb, Kernel: &kernel.Kernel{}, AI: &AIConfig{
 		Model: model, On: on,
-		New:    func(model string) Fixer { return &fakeFixer{name: model} },
+		New:    func(model string) Assistant { return &fakeAssistant{name: model} },
 		Models: func() []ai.ModelEntry { return testCatalog },
 		LocalModels: func(context.Context) ([]string, error) {
 			return s.ollama, s.ollamaE
@@ -85,11 +85,11 @@ func TestPickerToggle(t *testing.T) {
 		}
 	}
 	m.handleKey(press(tea.KeyEnter, 0))
-	if m.overlay != overlayNone || m.fixer != nil || m.aiModel != "anthropic/claude-sonnet-5" {
-		t.Fatalf("off: overlay=%v fixer=%v model=%q", m.overlay, m.fixer, m.aiModel)
+	if m.overlay != overlayNone || m.assistant != nil || m.aiModel != "anthropic/claude-sonnet-5" {
+		t.Fatalf("off: overlay=%v assistant=%v model=%q", m.overlay, m.assistant, m.aiModel)
 	}
 	m.handleKey(keyF) // no fix key while off
-	if m.fix.active {
+	if m.task.active {
 		t.Fatal("f works while AI is off")
 	}
 
@@ -98,8 +98,8 @@ func TestPickerToggle(t *testing.T) {
 		t.Fatalf("reopened on %+v", r)
 	}
 	m.handleKey(press(tea.KeyEnter, 0))
-	if m.fixer == nil || m.fixer.Model() != "anthropic/claude-sonnet-5" {
-		t.Fatalf("not back on: %v", m.fixer)
+	if m.assistant == nil || m.assistant.Model() != "anthropic/claude-sonnet-5" {
+		t.Fatalf("not back on: %v", m.assistant)
 	}
 	want := [][2]any{{"anthropic/claude-sonnet-5", false}, {"anthropic/claude-sonnet-5", true}}
 	if len(s.saved) != 2 || s.saved[0] != want[0] || s.saved[1] != want[1] {
@@ -119,7 +119,7 @@ func TestPickerFilterAndChoose(t *testing.T) {
 		t.Fatalf("filter gpt: %+v", m.picker.rows)
 	}
 	m.handleKey(press(tea.KeyEnter, 0))
-	if m.fixer == nil || m.aiModel != "openai/gpt-5.6" || len(s.saved) != 1 {
+	if m.assistant == nil || m.aiModel != "openai/gpt-5.6" || len(s.saved) != 1 {
 		t.Fatalf("chose: model=%q saved=%v", m.aiModel, s.saved)
 	}
 	if !strings.Contains(m.status, "openai/gpt-5.6") {
@@ -138,7 +138,7 @@ func TestPickerModelWithoutKey(t *testing.T) {
 		t.Errorf("no hint:\n%s", screenText(m))
 	}
 	m.handleKey(press(tea.KeyEnter, 0))
-	if m.overlay != overlayModel || m.fixer != nil || len(s.saved) != 0 {
+	if m.overlay != overlayModel || m.assistant != nil || len(s.saved) != 0 {
 		t.Fatal("a model without a key was chosen")
 	}
 }
@@ -160,7 +160,7 @@ func TestPickerOllama(t *testing.T) {
 	}
 	typePicker(m, "qwen")
 	m.handleKey(press(tea.KeyEnter, 0))
-	if m.overlay != overlayNone || m.aiModel != "ollama/qwen3:1.7b" || m.fixer == nil || len(s.saved) != 1 {
+	if m.overlay != overlayNone || m.aiModel != "ollama/qwen3:1.7b" || m.assistant == nil || len(s.saved) != 1 {
 		t.Fatalf("chose: overlay=%v model=%q", m.overlay, m.aiModel)
 	}
 
@@ -210,21 +210,21 @@ func TestPickerOllamaUnavailable(t *testing.T) {
 // TestPickerSwitchCancelsFix: a fix belongs to the model it was asked of.
 func TestPickerSwitchCancelsFix(t *testing.T) {
 	m, _ := newPickerModel(t, "anthropic/claude-sonnet-5", true)
-	f := &fakeFixer{block: true}
-	m.fixer = f
+	f := &fakeAssistant{block: true}
+	m.assistant = f
 	m.cells[0].status = statusFailed
 	m.cells[0].outputs = []notebook.Output{{Kind: notebook.Error, Text: "boom"}}
 	batch := m.handleKey(keyF)
-	if !m.fix.active {
+	if !m.task.active {
 		t.Fatal("fix not started")
 	}
 	m.handleKey(keyM)
 	m.handleKey(press(tea.KeyEnter, 0)) // Off
-	if m.fix.active {
+	if m.task.active {
 		t.Fatal("switching AI off left the fix running")
 	}
-	runFixCmds(m, batch)
-	if m.fix.pending() || m.overlay != overlayNone {
+	runTaskCmds(m, batch)
+	if m.task.pending() || m.overlay != overlayNone {
 		t.Fatal("the cancelled fix surfaced")
 	}
 }

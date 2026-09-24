@@ -22,8 +22,8 @@ type AIConfig struct {
 	Model string
 	// On says whether AI features are on.
 	On bool
-	// New returns a Fixer using model.
-	New func(model string) Fixer
+	// New returns an Assistant using model.
+	New func(model string) Assistant
 	// Models lists the models the picker offers.
 	Models func() []ai.ModelEntry
 	// LocalModels lists the models installed in the local Ollama server.
@@ -98,7 +98,7 @@ func (m *Model) openModelPicker() tea.Cmd {
 	p.query = "\x00" // force refiltering
 	m.refilterPicker()
 	p.idx = 0
-	if m.fixer == nil {
+	if m.assistant == nil {
 		usable := func(k pickKind) func(pickRow) bool {
 			return func(r pickRow) bool { return r.kind == k && r.needs == "" }
 		}
@@ -116,7 +116,7 @@ func (m *Model) openModelPicker() tea.Cmd {
 // pickerRows builds the first stage: Off, the current or last model,
 // Ollama, then the catalog.
 func (m *Model) pickerRows() []pickRow {
-	on := m.fixer != nil
+	on := m.assistant != nil
 	rows := []pickRow{{kind: pickOff, label: "Off", desc: "no AI features", active: !on}}
 	if m.aiModel != "" {
 		desc := "last used"
@@ -298,7 +298,7 @@ func (m *Model) handleOllamaModels(msg ollamaModelsMsg) {
 		id := ai.OllamaProvider + "/" + name
 		p.all = append(p.all, pickRow{
 			kind: pickModel, id: id, label: name,
-			active: m.fixer != nil && id == m.aiModel,
+			active: m.assistant != nil && id == m.aiModel,
 			entry:  ai.ModelEntry{Provider: ai.OllamaProvider, Model: name, Ready: true},
 		})
 	}
@@ -369,17 +369,17 @@ func (m *Model) choosePicker(i int) tea.Cmd {
 
 // setAI switches AI on with model, or off (keeping model to return to).
 func (m *Model) setAI(model string, on bool) tea.Cmd {
-	// A fix in progress or awaiting review belongs to the old setting.
-	if m.fix.active {
-		m.fix.cancel()
+	// A request in progress or awaiting review belongs to the old setting.
+	if m.task.active {
+		m.task.cancel()
 	}
-	m.fix = fixState{seq: m.fix.seq + 1}
+	m.task = aiTask{seq: m.task.seq + 1}
 	m.aiModel = model
-	m.fixer = nil
+	m.assistant = nil
 	if on && model != "" && m.ai.New != nil {
-		m.fixer = m.ai.New(model)
+		m.assistant = m.ai.New(model)
 	}
-	on = m.fixer != nil
+	on = m.assistant != nil
 
 	if m.ai.Save != nil {
 		if err := m.ai.Save(model, on); err != nil {
@@ -389,10 +389,10 @@ func (m *Model) setAI(model string, on bool) tea.Cmd {
 	if !on {
 		return m.setStatus(statusInfo, "AI off · M to turn it back on")
 	}
-	if err := m.fixer.Ready(); err != nil {
+	if err := m.assistant.Ready(); err != nil {
 		return m.setStatus(statusError, "AI model %s: %v", model, err)
 	}
-	return m.setStatus(statusSuccess, "AI model %s · f fixes a failing cell", model)
+	return m.setStatus(statusSuccess, "AI model %s · e asks it to change a cell, f fixes a failing one", model)
 }
 
 // handleModelPickerKey handles keys while the picker is open. Letters go

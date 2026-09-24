@@ -19,7 +19,7 @@ func newAI(model string, on bool) *ui.AIConfig {
 	return &ui.AIConfig{
 		Model:       model,
 		On:          on && model != "",
-		New:         func(m string) ui.Fixer { return ai.New(m) },
+		New:         func(m string) ui.Assistant { return ai.New(m) },
 		Models:      ai.Catalog,
 		LocalModels: ai.OllamaModels,
 		Save:        saveAI,
@@ -58,8 +58,8 @@ func modelCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "model [provider | provider/model | off]",
 		Short: "Show or set the AI model (AI features are off until you set one)",
-		Long: "AI features, like fixing a failing cell with f, are off until you pick a model,\n" +
-			"here or with M inside gopyter.\n" +
+		Long: "AI features, like changing a cell with e or fixing a failing one with f, are off\n" +
+			"until you pick a model, here or with M inside gopyter.\n" +
 			"Without an argument, this shows the current setting and which providers have an\n" +
 			"API key in the environment. With one, it saves the model: a provider name picks\n" +
 			"a default model for it, provider/model picks any model kit supports, and off\n" +
@@ -109,8 +109,9 @@ func modelCmd() *cobra.Command {
 				b.WriteString(err.Error())
 				b.WriteString("\n")
 			}
-			b.WriteString("\nPress f on a cell with an error to have it fixed. The request sends that cell,\n")
-			b.WriteString("its error and the code cells above it (not their outputs) to the provider.\n")
+			b.WriteString("\nPress e on a code cell to have it written or changed as you describe, or f on a\n")
+			b.WriteString("cell with an error to have it fixed. A request sends that cell, its error and\n")
+			b.WriteString("the code cells above it (not their outputs) to the provider.\n")
 			b.WriteString("Press M in gopyter to switch models or turn AI off.\n")
 			_, err = io.WriteString(w, b.String())
 			return err

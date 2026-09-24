@@ -18,7 +18,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 |---------------------|---------------------------------------------------------------------------|
 | `main.go`           | cobra commands (`gopyter`, `gopyter run`, `gopyter model`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
-| `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix loop |
+| `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
@@ -134,25 +134,30 @@ concatenation in WriteString") count as issues to fix too.
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.
 
-### AI (`internal/ai`, `internal/ui/fix.go`, `ai.go`)
+### AI (`internal/ai`, `internal/ui/assist.go`, `ai.go`)
 
 - AI is off unless a model is set and on (`M` in the UI, `gopyter model`,
   `--model`, the `ai_model`/`ai_off` settings). `ui.Options.AI` is nil in
-  the noai build; while AI is off, `Model.fixer` is nil and nothing
+  the noai build; while AI is off, `Model.assistant` is nil and nothing
   AI-related may be rendered, bound or started, except `M` in the help
-  overlay. Keep new AI features behind `m.fixer != nil`.
+  overlay. Keep new AI features behind `m.assistant != nil`.
 - The model picker (`modelpicker.go`) lists kit's catalog (`ai.Catalog`)
   and, on its Ollama row, the server's installed models. Switching models
-  goes through `setAI`, which cancels any fix of the old model.
+  goes through `setAI`, which cancels any request of the old model.
 - Agents are built with `kit.NewIsolatedAgent`: no `.kit.yml`, AGENTS.md,
   skills, extensions, MCP servers or core tools. Give them only tools that
   can't run user code, like `Kernel.Check`. `TestFixIgnoresProjectKitSetup`
   guards this.
 - `Kernel.Check` builds in the `gopyter_check` sub-package, offline
   (`GOFLAGS=-mod=readonly`, `GOPROXY=off`), and never commits declarations.
-- The fix request runs on its own goroutine and reports through `fixMsg`,
-  matched by `fixState.seq` like completion results. Results are only
-  applied after review, as one undo step, and the cell is not run.
+- Fixes (`f`) and edits (`e`, an instruction typed in `overlayAsk`) share
+  one loop: `Assistant.propose` in `internal/ai` with its own system prompt
+  each, and one `aiTask` in the UI. A new kind of cell rewrite should be
+  another prompt on that loop, not a second one.
+- The request runs on its own goroutine and reports through `taskMsg`,
+  matched by `aiTask.seq` like completion results. Only one runs at a time.
+  Results are only applied after review (`overlayReview`), as one undo
+  step, and the cell is not run.
 - kit-using code is `//go:build !noai`; `internal/ai/ai.go` holds the
   kit-free types the UI needs, and `ai_noai.go` stubs the CLI. Tests use a
   scripted model through `kit.WithProvider`; they must never call a real

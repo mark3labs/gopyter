@@ -7,8 +7,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Dialogs have a focus ring made of their buttons and, for the save-as
-// dialog, the filename input. dlgFocus indexes the buttons; focusInput
+// Dialogs have a focus ring made of their buttons and, for the save-as and
+// ask dialogs, the text input. dlgFocus indexes the buttons; focusInput
 // (-1) means the text input has focus.
 const focusInput = -1
 
@@ -39,19 +39,32 @@ func (m *Model) dialogButtons() []dlgButton {
 			{action{kind: actReload}, "Reload", "load the file, discarding your changes · r", true},
 			{action{kind: actReloadKeep}, "Keep mine", "keep your version; saving overwrites the file · esc", false},
 		}
-	case overlayFix:
-		if m.fix.err != "" {
-			return []dlgButton{{action{kind: actFixDiscard}, "Close", "close · esc", false}}
+	case overlayReview:
+		if m.task.err != "" {
+			return []dlgButton{{action{kind: actReviewDiscard}, "Close", "close · esc", false}}
 		}
 		return []dlgButton{
-			{action{kind: actFixApply}, "Apply", "replace the cell with the fix", false},
-			{action{kind: actFixDiscard}, "Discard", "keep the cell as it is · esc", false},
+			{action{kind: actReviewApply}, "Apply", "replace the cell with the " + m.task.noun(), false},
+			{action{kind: actReviewDiscard}, "Discard", "keep the cell as it is · esc", false},
+		}
+	case overlayAsk:
+		return []dlgButton{
+			{action{kind: actAskSend}, "Ask", "send the request to " + m.assistant.Model(), false},
+			{action{kind: actDialogCancel}, "Cancel", "cancel · esc", false},
 		}
 	}
 	return nil
 }
 
-func (m *Model) dialogHasInput() bool { return m.overlay == overlaySaveAs }
+func (m *Model) dialogHasInput() bool { return m.overlay == overlaySaveAs || m.overlay == overlayAsk }
+
+// submitInput confirms the dialog's text input.
+func (m *Model) submitInput() tea.Cmd {
+	if m.overlay == overlayAsk {
+		return m.sendAsk()
+	}
+	return m.saveAsConfirm()
+}
 
 // openDialog shows a dialog with the default element focused.
 func (m *Model) openDialog(o overlay) tea.Cmd {
@@ -100,7 +113,7 @@ func (m *Model) handleDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.dialogCancel()
 	case "enter":
 		if onInput {
-			return m.saveAsConfirm()
+			return m.submitInput()
 		}
 		return m.doAction(buttons[m.dlgFocus].act)
 	}
@@ -146,19 +159,19 @@ func (m *Model) handleDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "k", "K":
 			return m.reloadKeep()
 		}
-	case overlayFix:
+	case overlayReview:
 		switch ks {
 		case "up", "k":
-			m.scrollFix(-1)
+			m.scrollReview(-1)
 		case "down", "j":
-			m.scrollFix(1)
+			m.scrollReview(1)
 		case "pgup", "ctrl+u":
-			m.scrollFix(-max(m.fix.rows-1, 1))
+			m.scrollReview(-max(m.task.rows-1, 1))
 		case "pgdown", "ctrl+d":
-			m.scrollFix(max(m.fix.rows-1, 1))
+			m.scrollReview(max(m.task.rows-1, 1))
 		}
-	case overlaySaveAs:
-		// Typing while a button is focused goes back to the filename.
+	case overlaySaveAs, overlayAsk:
+		// Typing while a button is focused goes back to the input.
 		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
 			cmd := m.setDialogFocus(focusInput)
 			var icmd tea.Cmd
@@ -187,9 +200,13 @@ func (m *Model) dialogCancel() tea.Cmd {
 		// Dismissing the reload dialog keeps the local version.
 		return m.reloadKeep()
 	}
-	if m.overlay == overlayFix {
-		m.discardFix()
+	if m.overlay == overlayReview {
+		m.discardProposal()
 		return nil
+	}
+	if m.overlay == overlayAsk {
+		// Keep what was typed for the next time the dialog opens.
+		m.ask.draft = m.input.Value()
 	}
 	m.overlay = overlayNone
 	m.quitAfter = false

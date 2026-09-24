@@ -39,7 +39,8 @@ const (
 	overlayMenu
 	overlayTheme
 	overlayReload
-	overlayFix
+	overlayReview
+	overlayAsk
 	overlayModel
 )
 
@@ -106,8 +107,9 @@ type Model struct {
 	info      infoState
 	ai        *AIConfig // nil: no AI support at all
 	aiModel   string    // selected model, kept while AI is off
-	fixer     Fixer     // nil while AI is off
-	fix       fixState
+	assistant Assistant // nil while AI is off
+	task      aiTask    // an AI fix or edit: in flight, then awaiting review
+	ask       askState
 	picker    modelPicker
 	vim       vimState
 	path      string
@@ -191,7 +193,7 @@ func New(opts Options) *Model {
 		cfg := *opts.AI
 		m.ai, m.aiModel = &cfg, cfg.Model
 		if cfg.On && cfg.Model != "" && cfg.New != nil {
-			m.fixer = cfg.New(cfg.Model)
+			m.assistant = cfg.New(cfg.Model)
 		}
 	}
 	m.themes.dark = !opts.LightBackground
@@ -269,7 +271,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.busy() && !m.comp.loading && !m.info.loading && !m.fix.active && !m.picker.loading {
+		if !m.busy() && !m.comp.loading && !m.info.loading && !m.task.active && !m.picker.loading {
 			m.spinning = false
 			return m, nil
 		}
@@ -289,8 +291,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case infoResultMsg:
 		return m, m.handleInfoResult(msg)
 
-	case fixMsg:
-		return m, m.handleFixMsg(msg)
+	case taskMsg:
+		return m, m.handleTaskMsg(msg)
 
 	case ollamaModelsMsg:
 		m.handleOllamaModels(msg)
@@ -306,7 +308,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleDiskPoll(msg)
 
 	case tea.PasteMsg:
-		if m.overlay == overlaySaveAs {
+		if m.dialogHasInput() {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
@@ -357,7 +359,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleKey(msg)
 	}
 
-	if m.overlay == overlaySaveAs {
+	if m.dialogHasInput() {
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
@@ -387,7 +389,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.overlay = overlayNone
 		}
 		return nil
-	case overlayQuit, overlaySaveAs, overlayReload, overlayFix:
+	case overlayQuit, overlaySaveAs, overlayReload, overlayReview, overlayAsk:
 		return m.handleDialogKey(msg)
 	case overlayTheme:
 		return m.handleThemeKey(msg)
@@ -434,8 +436,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.busy() {
 			return m.interrupt()
 		}
-		if m.fix.active {
-			return m.cancelFix()
+		if m.task.active {
+			return m.cancelTask()
 		}
 		if m.mode == modeEdit {
 			return m.setStatus(statusInfo, "press esc then q to quit")
@@ -735,15 +737,17 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openThemePicker()
 	case key.Matches(msg, k.ToggleVim):
 		return m.toggleVim()
-	case m.fixer != nil && key.Matches(msg, k.Fix):
+	case m.assistant != nil && key.Matches(msg, k.Fix):
 		return m.requestFix(m.sel)
+	case m.assistant != nil && key.Matches(msg, k.Ask):
+		return m.requestEdit(m.sel)
 	case m.ai != nil && key.Matches(msg, k.AIModel):
 		return m.openModelPicker()
 	case key.Matches(msg, k.Quit):
 		return m.requestQuit()
 	case msg.String() == "esc":
 		m.pendingKey = ""
-		return m.cancelFix()
+		return m.cancelTask()
 	}
 	return nil
 }
@@ -998,6 +1002,8 @@ func (m *Model) save() error {
 }
 
 func (m *Model) openSaveAs() tea.Cmd {
+	m.input.Placeholder = "notebook.ipynb"
+	m.input.SetWidth(40)
 	m.input.SetValue("")
 	return m.openDialog(overlaySaveAs)
 }
@@ -1032,8 +1038,8 @@ func (m *Model) quit() tea.Cmd {
 	if m.running != nil {
 		m.running.cancel()
 	}
-	if m.fix.active {
-		m.fix.cancel()
+	if m.task.active {
+		m.task.cancel()
 	}
 	m.quitting = true
 	return tea.Quit

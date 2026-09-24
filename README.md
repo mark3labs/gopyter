@@ -27,7 +27,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
 - **Live reload.** Edits made to the notebook file by other programs show up automatically
-- **Optional AI fixes.** Off until you pick a model; then `f` asks it to fix a failing cell, checks that the fix compiles, and shows you the diff before changing anything
+- **Optional AI.** Off until you pick a model; then `e` asks it to write or change a cell as you describe, and `f` to fix a failing one. Every proposal is checked to compile, and you see the diff before anything changes
 
 ## Install
 
@@ -143,6 +143,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `T`                          | pick a color theme                       |
 | `V`                          | turn vim bindings on / off (saved)       |
 | `M`                          | pick the AI model, or turn AI on / off   |
+| `e`                          | ask AI to write or change a cell (when AI is on) |
 | `f`                          | fix a failing cell with AI (when AI is on) |
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
@@ -210,7 +211,7 @@ gopyter --theme dracula notes.ipynb  # use a theme for this session only
 gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
 ```
 
-## AI fixes (optional)
+## AI (optional)
 
 AI features are off, and invisible, until you choose a model. gopyter uses
 [kit](https://github.com/mark3labs/kit), so any provider kit supports works,
@@ -238,13 +239,22 @@ API keys come from the provider's usual environment variable, like
 is saved as `"ai_model"` (and `"ai_off": true` while off) in the settings file
 described under Themes.
 
+To have a code cell written or changed, press `e` (or click **✦** on the cell,
+or use the context menu) and say what it should do: "read data.csv and sum the
+second column", "draw a histogram of xs", "make this concurrent". On an empty
+cell the model writes it from scratch. What you typed is kept until a change is
+applied, so after **Discard** or an error, `e` lets you refine the request
+instead of retyping it.
+
 When a cell fails, press `f` (or click **✦ fix** on the cell, or use the context
-menu). The model gets the cell, its error, and the code of the cells above it,
-but not their outputs. Its proposals are compiled with the rest of the notebook,
-without running anything, and it retries until one compiles. You then see a
-diff: **Apply** replaces the cell (undo with `ctrl+z` while editing),
-**Discard** keeps it. The cell isn't run for you. `esc` cancels a request in
-progress.
+menu) to have it fixed.
+
+Either way, the model gets the cell, its error if it failed, and the code of the
+cells above it, but not their outputs. Its proposals are compiled with the rest
+of the notebook, without running anything, and it retries until one compiles.
+You then see a diff: **Apply** replaces the cell (undo with `ctrl+z` while
+editing), **Discard** keeps it. The cell isn't run for you. `esc` cancels a
+request in progress; one request runs at a time.
 
 The agent only has that compile check as a tool: it can't read files, run
 commands or run your code. It also ignores kit's own setup, like `.kit.yml`,

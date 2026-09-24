@@ -45,6 +45,7 @@ const (
 	actToggleOutput
 	actCopyOutput
 	actFixCell     // ask the AI to fix the cell's error
+	actAskCell     // ask the AI to change the cell
 	actAddCode     // insert a code cell at index action.cell
 	actAddMarkdown // insert a markdown cell at index action.cell
 
@@ -61,8 +62,9 @@ const (
 	actDialogConfirm
 	actReload
 	actReloadKeep
-	actFixApply
-	actFixDiscard
+	actReviewApply
+	actReviewDiscard
+	actAskSend
 	actMenuItem       // action.cell is the item index
 	actCompletionItem // action.cell is the completion item index
 	actThemeItem      // action.cell is the theme picker entry index
@@ -504,6 +506,9 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		if m.fixable(c) {
 			items = append(items, menuItem{label: "✦ Fix with AI", key: "f", act: a(actFixCell)})
 		}
+		if m.editable(c) {
+			items = append(items, menuItem{label: "✦ Ask AI…", key: "e", act: a(actAskCell)})
+		}
 	} else {
 		items = append(items, menuItem{label: "▶ Render", key: "^↵", act: a(actRunCell)})
 	}
@@ -641,9 +646,13 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.commandKey(a.cell, "O")
 	case actFixCell:
 		return m.commandKey(a.cell, "f")
-	case actFixApply:
-		return m.applyFix()
-	case actFixDiscard:
+	case actAskCell:
+		return m.commandKey(a.cell, "e")
+	case actAskSend:
+		return m.sendAsk()
+	case actReviewApply:
+		return m.applyProposal()
+	case actReviewDiscard:
 		return m.dialogCancel()
 	case actToggleOutput:
 		if validCell {

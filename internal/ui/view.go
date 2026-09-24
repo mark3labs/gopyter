@@ -208,7 +208,7 @@ func (m *Model) renderToolbar() string {
 func (m *Model) renderFooter() string {
 	t := m.theme
 	pill := t.modeCmd.Render("COMMAND")
-	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()))
+	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
 	tip := "switch to edit mode · enter"
 	if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
@@ -248,9 +248,9 @@ func (m *Model) renderFooter() string {
 			st, icon = t.statusErr, "✗"
 		}
 		mid = st.Render(icon + " " + m.status)
-	} else if m.fix.active {
-		mid = m.spinner.View() + lipgloss.NewStyle().Foreground(colPrimary).Render(" ✦ fixing "+m.fix.name) +
-			t.dim.Render(" · "+m.fix.progress+" · ") + t.helpKey.Render("esc") + t.helpDesc.Render(" cancel")
+	} else if m.task.active {
+		mid = m.spinner.View() + lipgloss.NewStyle().Foreground(colPrimary).Render(" ✦ "+m.task.doing()) +
+			t.dim.Render(" · "+m.task.progress+" · ") + t.helpKey.Render("esc") + t.helpDesc.Render(" cancel")
 	} else if m.infoVisible() && !m.info.loading {
 		mid = t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
 		if len(m.info.lines) > m.info.rows {
@@ -565,7 +565,13 @@ func (m *Model) renderCell(i, width int) cellRender {
 	if c.ed.Value() == "" && !editing {
 		// Placeholder hint on empty cells.
 		idx := r.edTop
-		hint := t.subtle.Italic(true).Render("Go code… (enter to edit, shift+enter to run)")
+		hintText := "Go code… (enter to edit, shift+enter to run)"
+		if m.editable(c) {
+			hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+		}
+		// Narrow cells cut the hint rather than overflow the box.
+		hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")
+		hint := t.subtle.Italic(true).Render(hintText)
 		r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
 	}
 	if selected || i == m.hoverCell {
@@ -672,8 +678,11 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
 		{action{kind: actDeleteCell, cell: i}, "✕", "delete cell · dd", true},
 	}
-	if !markdown && m.fixable(c) {
-		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.fixer.Model() + ") · f", false}}, btns...)
+	switch {
+	case !markdown && m.fixable(c):
+		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.assistant.Model() + ") · f", false}}, btns...)
+	case !markdown && m.editable(c):
+		btns = append([]btn{{action{kind: actAskCell, cell: i}, "✦", "ask AI to change this cell (" + m.assistant.Model() + ") · e", false}}, btns...)
 	}
 	sep := frame.Render("─")
 	if markdown {
@@ -791,7 +800,7 @@ func (m *Model) renderOverlay() (string, []zone) {
 	case overlayHelp:
 		var cols []string
 		var grid string
-		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.fixer != nil) {
+		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.assistant != nil) {
 			var rows []string
 			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
 			for _, b := range sec.keys {
@@ -842,12 +851,15 @@ func (m *Model) renderOverlay() (string, []zone) {
 			m.input.View(),
 		})
 
-	case overlayFix:
+	case overlayAsk:
+		return dialog(colPrimary, m.renderAsk())
+
+	case overlayReview:
 		border := colPrimary
-		if m.fix.err != "" {
+		if m.task.err != "" {
 			border = colError
 		}
-		return dialog(border, m.renderFix())
+		return dialog(border, m.renderReview())
 
 	case overlayMenu:
 		return m.renderMenu()
