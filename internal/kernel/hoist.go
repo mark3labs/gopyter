@@ -53,8 +53,9 @@ func (k *Kernel) removeVarFile(name string) error {
 // distinct on case-insensitive file systems.
 func varFileName(name string) string { return hex.EncodeToString([]byte(name)) + ".gob" }
 
-// writeVars generates gopyter_vars.go for the hoisted variables in decls.
-func (k *Kernel) writeVars(decls []*Decl) error {
+// writeVars generates gopyter_vars.go in dir for the hoisted variables in
+// decls.
+func writeVars(dir string, decls []*Decl) error {
 	var vars []*Decl
 	imps := map[string]string{}
 	for _, d := range decls {
@@ -92,14 +93,16 @@ func (k *Kernel) writeVars(decls []*Decl) error {
 		b.WriteString(d.Src)
 		b.WriteString("\n\n")
 	}
-	return os.WriteFile(filepath.Join(k.Dir, varsFile), []byte(b.String()), 0o644)
+	return os.WriteFile(filepath.Join(dir, varsFile), []byte(b.String()), 0o644)
 }
 
 // hoist type-checks the cell with its variables kept local and decides
 // how each define is emitted. It returns the declarations for the hoisted
 // variables and functions. decls are the declarations of the other cells.
 // On any problem nothing is hoisted, and the build reports the errors.
-func (k *Kernel) hoist(ctx context.Context, cellID string, pc *parsedCell, decls []*Decl, imps []*Import) (map[*define]hoist, []*Decl) {
+// dir is the main package to type-check in: the workspace for Execute, a
+// separate one for Check. env is the go command environment to use.
+func (k *Kernel) hoist(ctx context.Context, dir string, env []string, cellID string, pc *parsedCell, decls []*Decl, imps []*Import) (map[*define]hoist, []*Decl) {
 	// Keep the variables this cell hoisted when it last ran, like the
 	// program will: "a := a + 1" re-run reads the saved a.
 	have := map[string]bool{}
@@ -120,17 +123,17 @@ func (k *Kernel) hoist(ctx context.Context, cellID string, pc *parsedCell, decls
 	local.render(nil)
 	local.body = local.plain // a void trailing call is not a type error
 	src, _ := k.generate(decls, imps, &local)
-	if err := os.WriteFile(filepath.Join(k.Dir, "main.go"), []byte(src), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0o644); err != nil {
 		return nil, nil
 	}
-	if err := k.writeVars(decls); err != nil {
+	if err := writeVars(dir, decls); err != nil {
 		return nil, nil
 	}
 	cfg := &packages.Config{
 		Context: ctx,
 		Mode:    packages.NeedName | packages.NeedTypes | packages.NeedTypesInfo | packages.NeedSyntax | packages.NeedImports,
-		Dir:     k.Dir,
-		Env:     k.goCmd(ctx).Env,
+		Dir:     dir,
+		Env:     env,
 	}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil || len(pkgs) != 1 || pkgs[0].Types == nil || pkgs[0].TypesInfo == nil {

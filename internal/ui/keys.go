@@ -37,6 +37,8 @@ type keyMap struct {
 	Help         key.Binding
 	Theme        key.Binding
 	ToggleVim    key.Binding
+	Fix          key.Binding
+	AIModel      key.Binding
 	Quit         key.Binding
 
 	// Edit mode
@@ -82,6 +84,8 @@ func newKeyMap() keyMap {
 		Help:         b([]string{"?"}, "?", "help"),
 		Theme:        b([]string{"T"}, "T", "color theme"),
 		ToggleVim:    b([]string{"V"}, "V", "vim keys on/off"),
+		Fix:          b([]string{"f"}, "f", "AI fix error"),
+		AIModel:      b([]string{"M"}, "M", "AI model / on-off"),
 		Quit:         b([]string{"q"}, "q", "quit"),
 
 		Escape: b([]string{"esc"}, "esc", "command mode"),
@@ -92,11 +96,15 @@ func newKeyMap() keyMap {
 }
 
 // commandShort returns the footer hints for command mode. The conversion
-// hint depends on the type of the selected cell.
-func (k keyMap) commandShort(kind notebook.CellType) []key.Binding {
+// hint depends on the type of the selected cell; fixable adds the AI fix
+// hint for a failed cell when AI is on.
+func (k keyMap) commandShort(kind notebook.CellType, fixable bool) []key.Binding {
 	convert := k.ToMarkdown
 	if kind != notebook.Code {
 		convert = k.ToCode
+	}
+	if fixable {
+		return []key.Binding{k.Fix, k.Edit, k.RunAdvance, convert, k.InsertBelow, k.Delete, k.Save, k.Help}
 	}
 	return []key.Binding{k.Edit, k.RunAdvance, convert, k.InsertBelow, k.Delete, k.Save, k.Help}
 }
@@ -133,9 +141,18 @@ func (k keyMap) vimVisualShort() []key.Binding {
 	return []key.Binding{hint("d", "delete"), hint("y", "yank"), hint("c", "change"), hint("esc", "normal")}
 }
 
-// fullHelp returns the help overlay sections; vim adds its own.
-func (k keyMap) fullHelp(vim bool) []helpSection {
+// fullHelp returns the help overlay sections; vim adds its own. The AI
+// section needs AI support (aiAvailable); its fix keys only show while AI
+// is on. The help overlay is the one place that mentions AI while it's off.
+func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 	secs := k.baseHelp()
+	if aiAvailable {
+		keys := []key.Binding{k.AIModel}
+		if aiOn {
+			keys = append(keys, k.Fix, hint("esc", "cancel a fix"))
+		}
+		secs = append(secs, helpSection{"AI", keys})
+	}
 	if vim {
 		secs = append(secs, helpSection{"Vim (edit mode)", []key.Binding{
 			hint("i a o", "insert / open line"),

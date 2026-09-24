@@ -27,6 +27,7 @@ A Jupyter-style notebook for **Go** that runs in your terminal.
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
 - **Live reload.** Edits made to the notebook file by other programs show up automatically
+- **Optional AI fixes.** Off until you pick a model; then `f` asks it to fix a failing cell, checks that the fix compiles, and shows you the diff before changing anything
 
 ## Install
 
@@ -141,6 +142,8 @@ mode** (green) edits text. Press `?` for the full list.
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
 | `V`                          | turn vim bindings on / off (saved)       |
+| `M`                          | pick the AI model, or turn AI on / off   |
+| `f`                          | fix a failing cell with AI (when AI is on) |
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
 copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
@@ -207,6 +210,48 @@ gopyter --theme dracula notes.ipynb  # use a theme for this session only
 gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
 ```
 
+## AI fixes (optional)
+
+AI features are off, and invisible, until you choose a model. gopyter uses
+[kit](https://github.com/mark3labs/kit), so any provider kit supports works,
+including local models through [Ollama](https://ollama.com).
+
+Press `M` to pick a model from kit's catalog: type to filter, `enter` to use
+it. Models whose provider has no API key are dimmed, with the variable to set.
+**Ollama** lists the models installed on your Ollama server (`OLLAMA_HOST`,
+`localhost:11434` by default). **Off** turns AI off but remembers the model,
+and the picker opens on whichever does the opposite of the current state, so
+`M` `enter` toggles AI on and off. `M` is only listed in the help (`?`) while
+AI is off; nothing else shows. The same from the command line:
+
+```sh
+gopyter model                      # show the setting and which providers have a key
+gopyter model anthropic            # a provider's default model
+gopyter model openai/gpt-5.6       # or any provider/model
+gopyter model ollama/qwen3-coder   # a local model, no key needed
+gopyter model off                  # turn AI off (the model is remembered)
+gopyter --model off notes.ipynb    # for one session only (like --theme)
+```
+
+API keys come from the provider's usual environment variable, like
+`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`. gopyter never stores them. The model
+is saved as `"ai_model"` (and `"ai_off": true` while off) in the settings file
+described under Themes.
+
+When a cell fails, press `f` (or click **✦ fix** on the cell, or use the context
+menu). The model gets the cell, its error, and the code of the cells above it,
+but not their outputs. Its proposals are compiled with the rest of the notebook,
+without running anything, and it retries until one compiles. You then see a
+diff: **Apply** replaces the cell (undo with `ctrl+z` while editing),
+**Discard** keeps it. The cell isn't run for you. `esc` cancels a request in
+progress.
+
+The agent only has that compile check as a tool: it can't read files, run
+commands or run your code. It also ignores kit's own setup, like `.kit.yml`,
+`AGENTS.md`, skills and MCP servers, so opening a notebook in a project that
+configures kit doesn't change what it can do. To build gopyter without AI
+support, and without the kit dependency, see Development.
+
 ## Headless
 
 ```sh
@@ -233,6 +278,7 @@ stay in effect. External edits to cell text can be undone.
 go test -race ./...
 golangci-lint run ./...
 go run . examples/tour.ipynb
+go build -tags noai .      # without AI support: no kit dependency, a much smaller binary
 ```
 
 See [AGENTS.md](AGENTS.md) for the architecture, conventions and testing

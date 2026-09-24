@@ -44,6 +44,7 @@ const (
 	actClearOutput
 	actToggleOutput
 	actCopyOutput
+	actFixCell     // ask the AI to fix the cell's error
 	actAddCode     // insert a code cell at index action.cell
 	actAddMarkdown // insert a markdown cell at index action.cell
 
@@ -60,9 +61,12 @@ const (
 	actDialogConfirm
 	actReload
 	actReloadKeep
+	actFixApply
+	actFixDiscard
 	actMenuItem       // action.cell is the item index
 	actCompletionItem // action.cell is the completion item index
 	actThemeItem      // action.cell is the theme picker entry index
+	actModelItem      // action.cell is the model picker row index
 )
 
 type action struct {
@@ -216,6 +220,9 @@ func (m *Model) handleMouseMotion(ms tea.Mouse) tea.Cmd {
 	}
 	if m.overlay == overlayTheme && m.hover.kind == actThemeItem {
 		m.previewTheme(m.hover.cell)
+	}
+	if m.overlay == overlayModel && m.hover.kind == actModelItem {
+		m.picker.idx = m.hover.cell
 	}
 	if m.comp.open && m.hover.kind == actCompletionItem {
 		m.comp.idx = m.hover.cell
@@ -375,6 +382,15 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 		}
 		return nil
 	}
+	if m.overlay == overlayModel {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.movePicker(-1)
+		case tea.MouseWheelDown:
+			m.movePicker(1)
+		}
+		return nil
+	}
 	if m.overlay != overlayNone {
 		return nil
 	}
@@ -426,6 +442,10 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 	case overlayTheme:
 		if !inside {
 			return m.cancelTheme()
+		}
+	case overlayModel:
+		if !inside {
+			m.closeModelPicker()
 		}
 	case overlayMenu:
 		if !inside {
@@ -480,6 +500,9 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 			items = append(items, menuItem{label: "■ Stop", key: "^c", act: a(actInterrupt)})
 		} else {
 			items = append(items, menuItem{label: "▶ Run cell", key: "^↵", act: a(actRunCell)})
+		}
+		if m.fixable(c) {
+			items = append(items, menuItem{label: "✦ Fix with AI", key: "f", act: a(actFixCell)})
 		}
 	} else {
 		items = append(items, menuItem{label: "▶ Render", key: "^↵", act: a(actRunCell)})
@@ -576,6 +599,8 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.openThemePicker()
 	case actThemeItem:
 		return m.confirmTheme(a.cell)
+	case actModelItem:
+		return m.choosePicker(a.cell)
 	case actToggleMode:
 		if m.mode == modeEdit {
 			m.leaveEdit()
@@ -614,6 +639,12 @@ func (m *Model) doAction(a action) tea.Cmd {
 		}
 	case actClearOutput:
 		return m.commandKey(a.cell, "O")
+	case actFixCell:
+		return m.commandKey(a.cell, "f")
+	case actFixApply:
+		return m.applyFix()
+	case actFixDiscard:
+		return m.dialogCancel()
 	case actToggleOutput:
 		if validCell {
 			m.cells[a.cell].expanded = !m.cells[a.cell].expanded

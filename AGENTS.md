@@ -16,9 +16,10 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go`           | cobra commands (`gopyter`, `gopyter run`) executed through `fang`         |
-| `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs |
-| `internal/config`   | user settings (the theme) persisted as JSON in the user config dir         |
+| `main.go`           | cobra commands (`gopyter`, `gopyter run`, `gopyter model`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
+| `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix loop |
+| `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
@@ -42,6 +43,7 @@ go test ./internal/kernel -run TestKernel -v   # a single test
 gofmt -l .                           # must print nothing
 go vet ./...
 golangci-lint run ./...              # v2, default config; must report 0 issues
+go test -tags noai ./...             # the build without AI (no kit dependency) must pass too
 ```
 
 Before finishing a change, run `gofmt -l .`, `go vet ./...`,
@@ -131,6 +133,30 @@ concatenation in WriteString") count as issues to fix too.
 - Completion (`completion.go`) is debounced, and responses are matched by
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.
+
+### AI (`internal/ai`, `internal/ui/fix.go`, `ai.go`)
+
+- AI is off unless a model is set and on (`M` in the UI, `gopyter model`,
+  `--model`, the `ai_model`/`ai_off` settings). `ui.Options.AI` is nil in
+  the noai build; while AI is off, `Model.fixer` is nil and nothing
+  AI-related may be rendered, bound or started, except `M` in the help
+  overlay. Keep new AI features behind `m.fixer != nil`.
+- The model picker (`modelpicker.go`) lists kit's catalog (`ai.Catalog`)
+  and, on its Ollama row, the server's installed models. Switching models
+  goes through `setAI`, which cancels any fix of the old model.
+- Agents are built with `kit.NewIsolatedAgent`: no `.kit.yml`, AGENTS.md,
+  skills, extensions, MCP servers or core tools. Give them only tools that
+  can't run user code, like `Kernel.Check`. `TestFixIgnoresProjectKitSetup`
+  guards this.
+- `Kernel.Check` builds in the `gopyter_check` sub-package, offline
+  (`GOFLAGS=-mod=readonly`, `GOPROXY=off`), and never commits declarations.
+- The fix request runs on its own goroutine and reports through `fixMsg`,
+  matched by `fixState.seq` like completion results. Results are only
+  applied after review, as one undo step, and the cell is not run.
+- kit-using code is `//go:build !noai`; `internal/ai/ai.go` holds the
+  kit-free types the UI needs, and `ai_noai.go` stubs the CLI. Tests use a
+  scripted model through `kit.WithProvider`; they must never call a real
+  provider.
 
 ## Testing instructions
 

@@ -24,6 +24,12 @@ type Settings struct {
 	Theme string `json:"theme,omitempty"`
 	// Vim enables vim key bindings in edit mode.
 	Vim bool `json:"vim,omitempty"`
+	// AIModel is the "provider/model" used for AI features, kept while they
+	// are off so they can be turned back on. API keys are never stored here.
+	AIModel string `json:"ai_model,omitempty"`
+	// AIOff turns AI features off without forgetting AIModel. AI is on
+	// when AIModel is set and AIOff isn't.
+	AIOff bool `json:"ai_off,omitempty"`
 }
 
 // Path returns the location of the settings file.

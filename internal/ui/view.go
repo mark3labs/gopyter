@@ -208,7 +208,7 @@ func (m *Model) renderToolbar() string {
 func (m *Model) renderFooter() string {
 	t := m.theme
 	pill := t.modeCmd.Render("COMMAND")
-	bindings := m.keys.commandShort(m.cur().kind)
+	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()))
 	tip := "switch to edit mode · enter"
 	if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
@@ -248,6 +248,9 @@ func (m *Model) renderFooter() string {
 			st, icon = t.statusErr, "✗"
 		}
 		mid = st.Render(icon + " " + m.status)
+	} else if m.fix.active {
+		mid = m.spinner.View() + lipgloss.NewStyle().Foreground(colPrimary).Render(" ✦ fixing "+m.fix.name) +
+			t.dim.Render(" · "+m.fix.progress+" · ") + t.helpKey.Render("esc") + t.helpDesc.Render(" cancel")
 	} else if m.infoVisible() && !m.info.loading {
 		mid = t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
 		if len(m.info.lines) > m.info.rows {
@@ -669,6 +672,9 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
 		{action{kind: actDeleteCell, cell: i}, "✕", "delete cell · dd", true},
 	}
+	if !markdown && m.fixable(c) {
+		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.fixer.Model() + ") · f", false}}, btns...)
+	}
 	sep := frame.Render("─")
 	if markdown {
 		sep = " "
@@ -785,7 +791,7 @@ func (m *Model) renderOverlay() (string, []zone) {
 	case overlayHelp:
 		var cols []string
 		var grid string
-		for _, sec := range m.keys.fullHelp(m.vim.enabled) {
+		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.fixer != nil) {
 			var rows []string
 			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
 			for _, b := range sec.keys {
@@ -836,11 +842,21 @@ func (m *Model) renderOverlay() (string, []zone) {
 			m.input.View(),
 		})
 
+	case overlayFix:
+		border := colPrimary
+		if m.fix.err != "" {
+			border = colError
+		}
+		return dialog(border, m.renderFix())
+
 	case overlayMenu:
 		return m.renderMenu()
 
 	case overlayTheme:
 		return m.renderThemePicker()
+
+	case overlayModel:
+		return m.renderModelPicker()
 	}
 	return "", nil
 }

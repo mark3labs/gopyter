@@ -62,6 +62,7 @@ type Kernel struct {
 	RunDir string
 
 	mu      sync.Mutex
+	checkMu sync.Mutex // serializes Check, which reuses one directory
 	ownsDir bool
 	decls   []*Decl
 	imports []*Import
@@ -515,14 +516,14 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 		if err := os.WriteFile(mainPath, []byte(src), 0o644); err != nil {
 			return err
 		}
-		return k.writeVars(decls)
+		return writeVars(k.Dir, decls)
 	}
 	// prepare decides which variables are hoisted, which needs the
 	// dependencies (it is repeated after fetching modules).
 	prepare := func() error {
 		decls, imps = k.merge(cellID, pc.decls, pc.imports)
 		if len(pc.defines) > 0 {
-			how, extra := k.hoist(ctx, cellID, pc, decls, imps)
+			how, extra := k.hoist(ctx, k.Dir, k.goCmd(ctx).Env, cellID, pc, decls, imps)
 			pc.render(how)
 			if len(extra) > 0 {
 				decls, imps = k.merge(cellID, append(slices.Clip(pc.decls), extra...), pc.imports)

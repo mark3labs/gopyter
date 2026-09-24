@@ -48,6 +48,7 @@ func rootCmd() *cobra.Command {
 		syntax     string
 		noComplete bool
 		vim        bool
+		model      string
 	)
 	cmd := &cobra.Command{
 		Use:   "gopyter [notebook.ipynb]",
@@ -79,6 +80,10 @@ func rootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			aiModel, aiOn, err := resolveModel(cmd, model, settings)
+			if err != nil {
+				return err
+			}
 			// An explicit --vim / --vim=false wins for this session only.
 			if !cmd.Flags().Changed("vim") {
 				vim = settings.Vim
@@ -96,6 +101,7 @@ func rootCmd() *cobra.Command {
 				defer func() { _ = engine.Close() }()
 				opts.Completer = engine
 			}
+			opts.AI = newAI(aiModel, aiOn)
 			return ui.Run(cmd.Context(), opts)
 		},
 	}
@@ -104,8 +110,9 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().StringVar(&syntax, "syntax-theme", "", "chroma syntax highlighting style, overriding the theme's")
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
+	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir), themesCmd())
+	cmd.AddCommand(runCmd(&workdir), themesCmd(), modelCmd())
 	return cmd
 }
 

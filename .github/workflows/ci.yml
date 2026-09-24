@@ -56,6 +56,17 @@ jobs:
           CGO_ENABLED: "0"
         run: go build ./...
 
+      # The noai build leaves out kit (internal/ai's agent code) entirely.
+      # Keep it compiling, passing and free of the dependency.
+      - name: Build and test without AI (-tags noai)
+        run: |
+          go vet -tags noai ./...
+          go test -tags noai ./...
+          if go list -tags noai -deps . | grep -q 'github.com/mark3labs/kit'; then
+            echo "the noai build depends on kit"
+            exit 1
+          fi
+
   lint:
     runs-on: ubuntu-latest
     steps:

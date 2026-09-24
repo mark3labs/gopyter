@@ -36,6 +36,9 @@ type Cell struct {
 	duration time.Duration
 	expanded bool
 	metadata map[string]any
+	// ran is set once the cell has run in the current kernel session. The
+	// execution count may come from the saved notebook instead.
+	ran bool
 
 	mdSrc, mdOut string
 	mdWidth      int

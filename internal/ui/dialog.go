@@ -39,6 +39,14 @@ func (m *Model) dialogButtons() []dlgButton {
 			{action{kind: actReload}, "Reload", "load the file, discarding your changes · r", true},
 			{action{kind: actReloadKeep}, "Keep mine", "keep your version; saving overwrites the file · esc", false},
 		}
+	case overlayFix:
+		if m.fix.err != "" {
+			return []dlgButton{{action{kind: actFixDiscard}, "Close", "close · esc", false}}
+		}
+		return []dlgButton{
+			{action{kind: actFixApply}, "Apply", "replace the cell with the fix", false},
+			{action{kind: actFixDiscard}, "Discard", "keep the cell as it is · esc", false},
+		}
 	}
 	return nil
 }
@@ -138,6 +146,17 @@ func (m *Model) handleDialogKey(msg tea.KeyPressMsg) tea.Cmd {
 		case "k", "K":
 			return m.reloadKeep()
 		}
+	case overlayFix:
+		switch ks {
+		case "up", "k":
+			m.scrollFix(-1)
+		case "down", "j":
+			m.scrollFix(1)
+		case "pgup", "ctrl+u":
+			m.scrollFix(-max(m.fix.rows-1, 1))
+		case "pgdown", "ctrl+d":
+			m.scrollFix(max(m.fix.rows-1, 1))
+		}
 	case overlaySaveAs:
 		// Typing while a button is focused goes back to the filename.
 		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
@@ -167,6 +186,10 @@ func (m *Model) dialogCancel() tea.Cmd {
 	if m.overlay == overlayReload {
 		// Dismissing the reload dialog keeps the local version.
 		return m.reloadKeep()
+	}
+	if m.overlay == overlayFix {
+		m.discardFix()
+		return nil
 	}
 	m.overlay = overlayNone
 	m.quitAfter = false

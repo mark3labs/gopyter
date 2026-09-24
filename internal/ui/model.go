@@ -39,6 +39,8 @@ const (
 	overlayMenu
 	overlayTheme
 	overlayReload
+	overlayFix
+	overlayModel
 )
 
 type statusKind int
@@ -91,6 +93,8 @@ type Options struct {
 	Vim bool
 	// SaveVim persists vim bindings toggled in the UI (optional).
 	SaveVim func(on bool) error
+	// AI configures the optional AI features. When nil, none is shown.
+	AI *AIConfig
 }
 
 // Model is the root Bubble Tea model.
@@ -100,6 +104,11 @@ type Model struct {
 	completer Completer
 	comp      completionState
 	info      infoState
+	ai        *AIConfig // nil: no AI support at all
+	aiModel   string    // selected model, kept while AI is off
+	fixer     Fixer     // nil while AI is off
+	fix       fixState
+	picker    modelPicker
 	vim       vimState
 	path      string
 	meta      map[string]any
@@ -178,6 +187,13 @@ func New(opts Options) *Model {
 		k: opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
 		keys: newKeyMap(), follow: true, hoverCell: -1,
 	}
+	if opts.AI != nil {
+		cfg := *opts.AI
+		m.ai, m.aiModel = &cfg, cfg.Model
+		if cfg.On && cfg.Model != "" && cfg.New != nil {
+			m.fixer = cfg.New(cfg.Model)
+		}
+	}
 	m.themes.dark = !opts.LightBackground
 	m.themes.syntax = opts.SyntaxTheme
 	m.themes.save = opts.SaveTheme
@@ -198,6 +214,7 @@ func New(opts Options) *Model {
 	m.input.Prompt = "❯ "
 	m.input.Placeholder = "notebook.ipynb"
 	m.input.SetWidth(40)
+	m.picker.filter = newFilterInput()
 
 	name := opts.Theme
 	if !ValidTheme(name) {
@@ -252,7 +269,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		if !m.busy() && !m.comp.loading && !m.info.loading {
+		if !m.busy() && !m.comp.loading && !m.info.loading && !m.fix.active && !m.picker.loading {
 			m.spinning = false
 			return m, nil
 		}
@@ -272,6 +289,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case infoResultMsg:
 		return m, m.handleInfoResult(msg)
 
+	case fixMsg:
+		return m, m.handleFixMsg(msg)
+
+	case ollamaModelsMsg:
+		m.handleOllamaModels(msg)
+		return m, nil
+
 	case runEventsMsg:
 		return m, m.handleRunEvents(msg)
 
@@ -285,6 +309,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.overlay == overlaySaveAs {
 			var cmd tea.Cmd
 			m.input, cmd = m.input.Update(msg)
+			return m, cmd
+		}
+		if m.overlay == overlayModel {
+			var cmd tea.Cmd
+			m.picker.filter, cmd = m.picker.filter.Update(msg)
+			m.refilterPicker()
 			return m, cmd
 		}
 		if m.overlay == overlayNone && m.mode == modeEdit {
@@ -332,6 +362,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
+	if m.overlay == overlayModel {
+		var cmd tea.Cmd
+		m.picker.filter, cmd = m.picker.filter.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -352,10 +387,12 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			m.overlay = overlayNone
 		}
 		return nil
-	case overlayQuit, overlaySaveAs, overlayReload:
+	case overlayQuit, overlaySaveAs, overlayReload, overlayFix:
 		return m.handleDialogKey(msg)
 	case overlayTheme:
 		return m.handleThemeKey(msg)
+	case overlayModel:
+		return m.handleModelPickerKey(msg)
 	}
 
 	m.follow = true
@@ -396,6 +433,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		if m.busy() {
 			return m.interrupt()
+		}
+		if m.fix.active {
+			return m.cancelFix()
 		}
 		if m.mode == modeEdit {
 			return m.setStatus(statusInfo, "press esc then q to quit")
@@ -695,10 +735,15 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.openThemePicker()
 	case key.Matches(msg, k.ToggleVim):
 		return m.toggleVim()
+	case m.fixer != nil && key.Matches(msg, k.Fix):
+		return m.requestFix(m.sel)
+	case m.ai != nil && key.Matches(msg, k.AIModel):
+		return m.openModelPicker()
 	case key.Matches(msg, k.Quit):
 		return m.requestQuit()
 	case msg.String() == "esc":
 		m.pendingKey = ""
+		return m.cancelFix()
 	}
 	return nil
 }
@@ -807,6 +852,7 @@ func (m *Model) startNext() tea.Cmd {
 		m.counter++
 		m.runSeq++
 		c.count = m.counter
+		c.ran = true
 		c.outputs = nil
 		c.status = statusRunning
 		c.errMsg = ""
@@ -925,6 +971,9 @@ func (m *Model) restart() tea.Cmd {
 	m.interrupt()
 	err := m.k.Reset()
 	m.counter = 0
+	for _, c := range m.cells {
+		c.ran = false
+	}
 	if err != nil {
 		return m.setStatus(statusError, "kernel restarted, but saved variables remain: %v", err)
 	}
@@ -982,6 +1031,9 @@ func (m *Model) hasContent() bool {
 func (m *Model) quit() tea.Cmd {
 	if m.running != nil {
 		m.running.cancel()
+	}
+	if m.fix.active {
+		m.fix.cancel()
 	}
 	m.quitting = true
 	return tea.Quit
