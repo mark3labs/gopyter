@@ -7,6 +7,7 @@ import (
 	"go/scanner"
 	"go/token"
 	"strings"
+	"unicode"
 )
 
 // Decl is a package-level declaration that persists across cell executions.
@@ -37,6 +38,10 @@ type Command struct {
 	Line  int
 	Magic bool
 	Text  string
+	// Cell is set for a cell magic ("%%writefile", "%%bash", ...), which
+	// takes the rest of the cell as Input.
+	Cell  bool
+	Input string
 }
 
 // parsedCell is the result of splitting a cell into its components.
@@ -48,6 +53,17 @@ type parsedCell struct {
 	userMain string // user-provided func main, if any
 	commands []Command
 	hasCode  bool
+
+	// GoNB-style run settings: %% / %main [args], %exec fn [args] and
+	// %test [flags]. Their arguments replace %args for this cell only.
+	args       []string
+	hasArgs    bool
+	parseFlags bool     // call flag.Parse() first thing in main
+	exec       string   // %exec: the function main calls
+	execLine   int      // line of the %exec magic, for errors
+	test       bool     // %test: build with go test
+	tests      []string // Test/Example/Fuzz functions declared by the cell
+	benchmarks []string // Benchmark functions declared by the cell
 
 	name    string    // name used in //line directives
 	src     string    // cell source with commands blanked
@@ -197,25 +213,77 @@ func lineDirective(name string, line, col int) string {
 	return fmt.Sprintf("//line %s:%d:%d\n", name, line, max(col, 1))
 }
 
+// cellMagics are the "%%name" cell magics: the rest of the cell is their
+// input rather than Go code.
+var cellMagics = map[string]bool{"writefile": true, "script": true, "bash": true, "sh": true}
+
+// commandLine returns the command of a cell line ("!..." or "%..."),
+// trimmed, or "" if the line is Go code. GoNB also accepts commands
+// written as "//gonb:%...", which keeps files valid Go for editors.
+func commandLine(l string) string {
+	t := strings.TrimSpace(l)
+	if rest, ok := strings.CutPrefix(t, "//gonb:"); ok && (strings.HasPrefix(rest, "%") || strings.HasPrefix(rest, "!")) {
+		t = rest
+	}
+	if strings.HasPrefix(t, "!") || strings.HasPrefix(t, "%") {
+		return t
+	}
+	return ""
+}
+
+// cellMagic returns the cell magic starting src (its first non-blank line),
+// if any: its name, arguments and the rest of the cell.
+func cellMagic(src string) (name, args, body string, ok bool) {
+	lines := strings.SplitAfter(src, "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		t, found := strings.CutPrefix(commandLine(l), "%%")
+		if !found {
+			return "", "", "", false
+		}
+		name, args, _ = strings.Cut(strings.TrimSpace(t), " ")
+		if !cellMagics[name] {
+			return "", "", "", false
+		}
+		return name, strings.TrimSpace(args), strings.Join(lines[i+1:], ""), true
+	}
+	return "", "", "", false
+}
+
 // parseCell splits a cell into declarations, imports, statements and
 // commands. name is used for //line directives (e.g. "In[3]").
 func parseCell(cellID, name, src string) (*parsedCell, error) {
 	pc := &parsedCell{}
 
+	if magic, args, body, ok := cellMagic(src); ok {
+		pc.commands = []Command{{Line: 1, Magic: true, Cell: true, Text: strings.TrimSpace(magic + " " + args), Input: body}}
+		return pc, nil
+	}
+
 	// Extract shell commands and magics, blanking them to preserve lines.
 	lines := strings.Split(src, "\n")
-	for i, l := range lines {
-		t := strings.TrimSpace(l)
+	for i := 0; i < len(lines); i++ {
+		t := commandLine(lines[i])
 		switch {
 		case strings.HasPrefix(t, "!"):
-			pc.commands = append(pc.commands, Command{Line: i + 1, Text: strings.TrimSpace(t[1:])})
+			line := i + 1
+			text := strings.TrimPrefix(t[1:], "*") // GoNB's "!*": in the workspace, like "!"
 			lines[i] = ""
-		case t == "%%" || strings.HasPrefix(t, "%%"):
-			// GoNB compatibility: "%%" marks the start of main; we don't need it.
-			lines[i] = ""
+			// A trailing backslash continues the command; sh -c joins
+			// the lines itself.
+			for strings.HasSuffix(text, "\\") && i+1 < len(lines) {
+				i++
+				text += "\n" + lines[i]
+				lines[i] = ""
+			}
+			pc.commands = append(pc.commands, Command{Line: line, Text: strings.TrimSpace(text)})
 		case strings.HasPrefix(t, "%"):
-			pc.commands = append(pc.commands, Command{Line: i + 1, Magic: true, Text: strings.TrimSpace(t[1:])})
 			lines[i] = ""
+			if err := pc.addMagic(name, i+1, strings.TrimSpace(t[1:])); err != nil {
+				return nil, err
+			}
 		}
 	}
 	src = strings.Join(lines, "\n")
@@ -236,11 +304,99 @@ func parseCell(cellID, name, src string) (*parsedCell, error) {
 		}
 	}
 	pc.render(nil)
-	pc.hasCode = len(chunks) > 0
+	pc.hasCode = len(chunks) > 0 || pc.exec != "" || pc.test
 	if pc.userMain != "" && len(pc.stmts) > 0 {
 		return nil, fmt.Errorf("%s: cell defines func main() and also has top-level statements", name)
 	}
+	switch {
+	case pc.test && pc.exec != "":
+		return nil, fmt.Errorf("%s: %%test and %%exec can't be used together", name)
+	case (pc.test || pc.exec != "") && pc.userMain != "":
+		return nil, fmt.Errorf("%s: a %%test or %%exec cell can't define func main()", name)
+	case pc.test && len(pc.stmts) > 0:
+		return nil, fmt.Errorf("%s: a %%test cell can only have declarations (put statements in a test function)", name)
+	case pc.exec != "" && len(pc.stmts) > 0:
+		return nil, fmt.Errorf("%s: a %%exec cell can only have declarations (%%exec calls %s instead of running statements)", name, pc.exec)
+	}
 	return pc, nil
+}
+
+// addMagic records a %magic line. Magics that change how the cell is
+// built are handled here; the others run as commands before the code.
+func (pc *parsedCell) addMagic(name string, line int, text string) error {
+	fields, err := splitArgs(text)
+	if err != nil {
+		return fmt.Errorf("%s:%d: %%%s: %w", name, line, text, err)
+	}
+	if len(fields) == 0 {
+		return nil // a lone "%"
+	}
+	switch head := fields[0]; {
+	case head == "%" || head == "main":
+		// GoNB: "%%" starts func main(). Statements always go to main
+		// here; what it keeps is flag parsing and per-cell arguments.
+		pc.parseFlags = true
+		if len(fields) > 1 {
+			pc.args, pc.hasArgs = fields[1:], true
+		}
+	case strings.HasPrefix(head, "%"):
+		if !cellMagics[head[1:]] {
+			return fmt.Errorf("%s:%d: unknown cell magic %%%s (try %%help)", name, line, head)
+		}
+		return fmt.Errorf("%s:%d: %%%s must be the first line of the cell", name, line, head)
+	case head == "exec":
+		if len(fields) < 2 {
+			return fmt.Errorf("%s:%d: %%exec needs the name of the function to run", name, line)
+		}
+		pc.exec, pc.execLine, pc.parseFlags = fields[1], line, true
+		pc.args, pc.hasArgs = fields[2:], true
+	case head == "test":
+		pc.test = true
+		if len(fields) > 1 {
+			pc.args, pc.hasArgs = fields[1:], true
+		}
+	default:
+		pc.commands = append(pc.commands, Command{Line: line, Magic: true, Text: text})
+	}
+	return nil
+}
+
+// splitArgs splits a command line into words like a shell would, without
+// expansions: single and double quotes group words, and "" is an empty
+// argument.
+func splitArgs(s string) ([]string, error) {
+	var args []string
+	var cur strings.Builder
+	inWord := false
+	var quote rune
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '\'' || r == '"':
+			quote, inWord = r, true
+		case r == ' ' || r == '\t':
+			if inWord {
+				args = append(args, cur.String())
+				cur.Reset()
+				inWord = false
+			}
+		default:
+			cur.WriteRune(r)
+			inWord = true
+		}
+	}
+	if quote != 0 {
+		return nil, fmt.Errorf("unterminated %c quote", quote)
+	}
+	if inWord {
+		args = append(args, cur.String())
+	}
+	return args, nil
 }
 
 // render sets the main() body from the statements, emitting each define
@@ -340,7 +496,8 @@ var uninteresting = map[string]bool{
 	"Fscan": true, "Fscanf": true, "Fscanln": true,
 	"Write": true, "WriteString": true, "WriteByte": true, "WriteRune": true, "WriteTo": true,
 	"Copy": true, "CopyN": true, "ReadFrom": true, "Close": true,
-	"Display": true, "DisplayMarkdown": true,
+	"Display": true, "DisplayMarkdown": true, "DisplayPNG": true,
+	"DisplayID": true, "DisplayMarkdownID": true,
 	"print": true, "println": true, "panic": true, "close": true, "delete": true, "clear": true,
 }
 
@@ -391,6 +548,17 @@ func (pc *parsedCell) addDecl(cellID, name, src string, c chunk) error {
 				pc.userMain = prefixed
 				continue
 			}
+			if d.Recv == nil {
+				pc.addTestFunc(d.Name.Name)
+			}
+			if fn := d.Name.Name; d.Recv == nil && strings.HasPrefix(fn, "init_") {
+				// GoNB: every init_xxx() is an init(), so each cell can
+				// have its own. The name is padded to keep the columns;
+				// the key stays init_xxx so redefining it replaces it.
+				off := fset.Position(d.Name.Pos()).Offset - len("package main\n") - (len(prefixed) - len(text))
+				text = text[:off] + "init" + strings.Repeat(" ", len(fn)-len("init")) + text[off+len(fn):]
+				prefixed = lineDirective(name, c.line, c.col) + text
+			}
 			key := d.Name.Name
 			if d.Recv != nil && len(d.Recv.List) > 0 {
 				key = recvTypeName(d.Recv.List[0].Type) + "." + key
@@ -429,6 +597,47 @@ func (pc *parsedCell) addDecl(cellID, name, src string, c chunk) error {
 		}
 	}
 	return nil
+}
+
+// addTestFunc records the test functions a %test cell runs by default.
+func (pc *parsedCell) addTestFunc(name string) {
+	for _, prefix := range []string{"Test", "Example", "Fuzz", "Benchmark"} {
+		rest, ok := strings.CutPrefix(name, prefix)
+		// As go test: TestFoo and Test_foo, not Testing.
+		if !ok || (rest != "" && !startsUpperOrDigitOrUnderscore(rest)) {
+			continue
+		}
+		if prefix == "Benchmark" {
+			pc.benchmarks = append(pc.benchmarks, name)
+		} else {
+			pc.tests = append(pc.tests, name)
+		}
+		return
+	}
+}
+
+func startsUpperOrDigitOrUnderscore(s string) bool {
+	r := []rune(s)[0]
+	return r == '_' || unicode.IsUpper(r) || unicode.IsDigit(r)
+}
+
+// testArgs are the flags a %test cell runs with when none are given: the
+// cell's own tests and benchmarks, verbosely.
+func (pc *parsedCell) testArgs() []string {
+	if pc.hasArgs {
+		return pc.args
+	}
+	anchored := func(names []string) string {
+		if len(names) == 0 {
+			return "^$"
+		}
+		return "^(" + strings.Join(names, "|") + ")$"
+	}
+	args := []string{"-test.v", "-test.run=" + anchored(pc.tests)}
+	if len(pc.benchmarks) > 0 {
+		args = append(args, "-test.bench="+anchored(pc.benchmarks))
+	}
+	return args
 }
 
 func recvTypeName(e ast.Expr) string {

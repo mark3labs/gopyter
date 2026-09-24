@@ -13,6 +13,7 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 const (
@@ -210,7 +211,11 @@ func (m *Model) renderFooter() string {
 	pill := t.modeCmd.Render("COMMAND")
 	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
 	tip := "switch to edit mode · enter"
-	if m.mode == modeEdit {
+	if m.stdin.focus && m.running != nil {
+		pill = t.modeInsert.Render("INPUT")
+		bindings = m.keys.stdinShort()
+		tip = "leave the program input · esc"
+	} else if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
 		bindings = m.keys.editShort()
 		tip = "switch to command mode · esc"
@@ -634,7 +639,28 @@ func (m *Model) renderCell(i, width int) cellRender {
 			r.lines = append(r.lines, bar+lbl+"  "+l)
 		}
 	}
+	if m.stdinCell(c) {
+		line := m.renderStdin(boxW - 2)
+		x0, y := gutterWidth+2, len(r.lines)
+		r.zones = append(r.zones, zone{rect: image.Rect(x0, y, x0+max(lipgloss.Width(line), 1), y+1), act: action{kind: actFocusStdin, cell: i}, tip: "type input for the program · alt+i"})
+		r.lines = append(r.lines, bar+blank+"  "+line)
+	}
 	return r
+}
+
+// renderStdin renders the input line of the running cell's program.
+func (m *Model) renderStdin(width int) string {
+	t := m.theme
+	prompt := "stdin ❯ "
+	if !m.stdin.focus {
+		hint := "enter or click to type input"
+		if m.stdin.input.Value() != "" {
+			hint = m.stdin.input.Value()
+		}
+		return t.muted.Render(prompt) + t.subtle.Italic(true).Render(ansi.Truncate(hint, max(width-len(prompt), 1), "…"))
+	}
+	m.stdin.input.SetWidth(max(width-lipgloss.Width(prompt)-1, 1))
+	return lipgloss.NewStyle().Foreground(colPrimary).Bold(true).Render(prompt) + m.stdin.input.View()
 }
 
 // convertAction returns the action converting cell i to the other type,
@@ -721,24 +747,28 @@ func (m *Model) renderOutputs(c *Cell, width int) ([]string, int) {
 	var out []string
 	resultAt := -1
 	for _, o := range c.outputs {
-		if o.Kind == notebook.Result && resultAt < 0 {
+		if (o.Kind == notebook.Result || o.Kind == notebook.ImageOut) && resultAt < 0 {
 			resultAt = len(out)
 		}
 		switch o.Kind {
 		case notebook.Stdout:
-			for _, l := range wrapLines(normalizeOutput(o.Text), width) {
-				out = append(out, t.stdout.Render(l))
-			}
+			out = append(out, termLines(o.Text, t.stdout, width)...)
 		case notebook.Stderr:
-			for _, l := range wrapLines(normalizeOutput(o.Text), width) {
-				out = append(out, t.stderr.Render(l))
-			}
+			out = append(out, termLines(o.Text, t.stderr, width)...)
 		case notebook.Result:
 			for _, l := range wrapLines(normalizeOutput(o.Text), width) {
 				out = append(out, t.result.Render(l))
 			}
 		case notebook.MarkdownOut:
 			out = append(out, m.renderMarkdown(o.Text, width)...)
+		case notebook.ImageOut:
+			img, err := termimg.Decode(o.Text)
+			if err != nil {
+				out = append(out, t.errorBar.Render("┃ ")+t.errorText.Render("can't show image: "+err.Error()))
+				continue
+			}
+			// Leave room for some other output before the output folds.
+			out = append(out, termimg.Render(img, width, maxOutputLines-8)...)
 		case notebook.Info:
 			for _, l := range wrapLines(normalizeOutput(o.Text), width-2) {
 				out = append(out, t.info.Render("› "+l))

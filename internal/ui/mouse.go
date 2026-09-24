@@ -45,6 +45,7 @@ const (
 	actToggleOutput
 	actCopyOutput
 	actFixCell     // ask the AI to fix the cell's error
+	actFocusStdin  // type input for the running program
 	actAskCell     // ask the AI to change the cell
 	actAddCode     // insert a code cell at index action.cell
 	actAddMarkdown // insert a markdown cell at index action.cell
@@ -256,6 +257,11 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 		return nil // clicks on the popup don't reach the cells beneath
 	}
 	m.closeInfo()
+	// A click elsewhere leaves the program input (a click on it refocuses).
+	if m.stdin.focus {
+		m.stdin.focus = false
+		m.stdin.input.Blur()
+	}
 
 	if m.comp.open {
 		if z, ok := m.zoneAt(ms.X, ms.Y); ok && z.act.kind == actCompletionItem && ms.Button == tea.MouseLeft {
@@ -588,6 +594,8 @@ func (m *Model) doAction(a action) tea.Cmd {
 	switch a.kind {
 	case actRunSelected:
 		return m.runSelected(false, false)
+	case actFocusStdin:
+		return m.focusStdin()
 	case actRunAll:
 		return m.runAll()
 	case actInterrupt:
@@ -742,6 +750,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 func plainOutput(c *Cell) string {
 	var b strings.Builder
 	for _, o := range c.outputs {
+		if o.Kind == notebook.ImageOut {
+			b.WriteString("[image]\n") // base64 would be useless as text
+			continue
+		}
 		b.WriteString(o.Text)
 		if !strings.HasSuffix(o.Text, "\n") {
 			b.WriteByte('\n')

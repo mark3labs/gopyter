@@ -80,8 +80,11 @@ func (k *Kernel) Check(ctx context.Context, cellID, name, src string) (CheckResu
 		return CheckResult{}, err
 	}
 
+	k.mu.Lock()
+	build := append(append([]string{"build"}, k.goflags...), "-o", os.DevNull, ".")
+	k.mu.Unlock()
 	for {
-		cmd := k.goCmd(ctx, "build", "-o", os.DevNull, ".")
+		cmd := k.goCmd(ctx, build...)
 		cmd.Dir, cmd.Env = dir, env
 		out, err := cmd.CombinedOutput()
 		if ctx.Err() != nil {

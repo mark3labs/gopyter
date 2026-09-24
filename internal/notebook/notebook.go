@@ -3,7 +3,9 @@
 package notebook
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -28,6 +30,7 @@ const (
 	Stderr      OutputKind = "stderr"
 	Result      OutputKind = "result"
 	MarkdownOut OutputKind = "markdown"
+	ImageOut    OutputKind = "image" // Text is base64 image data (PNG unless read from a notebook)
 	Error       OutputKind = "error"
 	Info        OutputKind = "info"
 )
@@ -36,6 +39,9 @@ const (
 type Output struct {
 	Kind OutputKind
 	Text string
+	// ID is the id of an updatable output (DisplayID) while its cell
+	// runs. Like Jupyter's transient display_id, it isn't saved.
+	ID string
 }
 
 // Cell is a notebook cell.
@@ -175,6 +181,12 @@ func decodeOutput(o rawOutput) []Output {
 		if md, ok := o.Data["text/markdown"]; ok {
 			return []Output{{Kind: MarkdownOut, Text: string(md)}}
 		}
+		for _, mime := range []string{"image/png", "image/jpeg", "image/gif"} {
+			if img, ok := o.Data[mime]; ok {
+				// Jupyter may wrap base64 over lines; keep it on one.
+				return []Output{{Kind: ImageOut, Text: strings.Join(strings.Fields(string(img)), "")}}
+			}
+		}
 		if t, ok := o.Data["text/plain"]; ok {
 			return []Output{{Kind: Result, Text: string(t)}}
 		}
@@ -202,9 +214,27 @@ func encodeOutput(o Output, count int) rawOutput {
 	case MarkdownOut:
 		return rawOutput{OutputType: "display_data", Metadata: map[string]any{},
 			Data: map[string]multiline{"text/markdown": text}}
+	case ImageOut:
+		return rawOutput{OutputType: "display_data", Metadata: map[string]any{},
+			Data: map[string]multiline{imageMime(o.Text): text, "text/plain": "[image]"}}
 	default:
 		return rawOutput{OutputType: "error", EName: "error", EValue: o.Text, Traceback: strings.Split(o.Text, "\n")}
 	}
+}
+
+// imageMime sniffs the type of base64 image data, so images read from a
+// notebook are written back under the type they came with.
+func imageMime(b64 string) string {
+	// A partial final quantum is an error but still decodes the bytes before
+	// it, which is all the sniffing needs.
+	head, _ := base64.StdEncoding.DecodeString(b64[:min(len(b64), 16)])
+	switch {
+	case bytes.HasPrefix(head, []byte("\xff\xd8")):
+		return "image/jpeg"
+	case bytes.HasPrefix(head, []byte("GIF8")):
+		return "image/gif"
+	}
+	return "image/png"
 }
 
 // Marshal encodes the notebook as ipynb JSON.

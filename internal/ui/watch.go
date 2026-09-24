@@ -257,6 +257,7 @@ func (c *Cell) reload(nc *notebook.Cell) {
 	c.metadata = nc.Metadata
 	if c.count != nc.ExecutionCount || !slices.Equal(c.outputs, nc.Outputs) {
 		c.outputs, c.count = nc.Outputs, nc.ExecutionCount
+		c.outRev++
 		c.status, c.errMsg, c.duration = diskStatus(nc), "", 0
 		c.outKey, c.outLines = outputKey{}, nil
 	}

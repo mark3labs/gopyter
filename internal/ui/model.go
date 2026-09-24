@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,7 @@ type Model struct {
 	queue   []string
 	running *runState
 	runSeq  int
+	stdin   stdinState
 
 	spinner  spinner.Model
 	spinning bool
@@ -217,6 +219,7 @@ func New(opts Options) *Model {
 	m.input.Placeholder = "notebook.ipynb"
 	m.input.SetWidth(40)
 	m.picker.filter = newFilterInput()
+	m.stdin.input = newStdinInput()
 
 	name := opts.Theme
 	if !ValidTheme(name) {
@@ -319,6 +322,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refilterPicker()
 			return m, cmd
 		}
+		if m.overlay == overlayNone && m.stdin.focus {
+			var cmd tea.Cmd
+			m.stdin.input, cmd = m.stdin.input.Update(msg)
+			return m, cmd
+		}
 		if m.overlay == overlayNone && m.mode == modeEdit {
 			m.closeCompletion()
 			m.cur().ed.InsertText(msg.Content)
@@ -369,6 +377,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker.filter, cmd = m.picker.filter.Update(msg)
 		return m, cmd
 	}
+	if m.stdin.focus {
+		// e.g. cursor blinks
+		var cmd tea.Cmd
+		m.stdin.input, cmd = m.stdin.input.Update(msg)
+		return m, cmd
+	}
 	return m, nil
 }
 
@@ -400,6 +414,13 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	m.follow = true
 	k := m.keys
 
+	// The running program's input takes the keys while it has the focus.
+	if m.stdin.focus && m.running != nil {
+		return m.handleStdinKey(msg)
+	}
+	if key.Matches(msg, k.Input) && m.running != nil {
+		return m.focusStdin()
+	}
 	// The symbol info popup closes on any key; some are its own.
 	if m.infoKey(msg) {
 		return nil
@@ -672,6 +693,10 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		m.follow = false
 		m.offset += m.viewHeight() / 2
 	case key.Matches(msg, k.Edit):
+		if m.stdinCell(m.cur()) {
+			// The running cell: type its program's input.
+			return m.focusStdin()
+		}
 		m.enterEdit()
 	case key.Matches(msg, k.InsertAbove):
 		m.insertCell(m.sel, newCell(notebook.Code, ""))
@@ -725,6 +750,7 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		c := m.cur()
 		if c.status != statusRunning {
 			c.outputs, c.status, c.count = nil, statusIdle, 0
+			c.outRev++
 			m.dirty = true
 		}
 	case key.Matches(msg, k.RunAll):
@@ -858,6 +884,7 @@ func (m *Model) startNext() tea.Cmd {
 		c.count = m.counter
 		c.ran = true
 		c.outputs = nil
+		c.outRev++
 		c.status = statusRunning
 		c.errMsg = ""
 		c.started = time.Now()
@@ -868,8 +895,18 @@ func (m *Model) startNext() tea.Cmd {
 		rs := &runState{id: m.runSeq, cellID: c.id, cancel: cancel, ch: make(chan kernel.Event, 1024)}
 		m.running = rs
 		src, name := c.ed.Value(), fmt.Sprintf("In[%d]", c.count)
+		// The program's stdin is a pipe fed by the input under the cell.
+		var stdin io.Reader
+		r, w, err := os.Pipe()
+		if err == nil {
+			stdin = r
+			m.stdin.start(w)
+		}
 		go func() {
-			rs.err = m.k.Execute(ctx, c.id, name, src, func(e kernel.Event) { rs.ch <- e })
+			rs.err = m.k.ExecuteInput(ctx, c.id, name, src, stdin, func(e kernel.Event) { rs.ch <- e })
+			if r != nil {
+				_ = r.Close() // the program has its own copy
+			}
 			cancel()
 			close(rs.ch)
 		}()
@@ -908,19 +945,25 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 	_, c := m.cellByID(rs.cellID)
 	if c != nil {
 		for _, e := range msg.events {
+			kind := notebook.Info
 			switch e.Kind {
 			case kernel.Stdout:
-				c.appendOutput(notebook.Stdout, e.Text)
+				kind = notebook.Stdout
 			case kernel.Stderr:
-				c.appendOutput(notebook.Stderr, e.Text)
+				kind = notebook.Stderr
 			case kernel.Result:
-				c.appendOutput(notebook.Result, e.Text)
+				kind = notebook.Result
 			case kernel.Markdown:
-				c.appendOutput(notebook.MarkdownOut, e.Text)
+				kind = notebook.MarkdownOut
+			case kernel.Image:
+				kind = notebook.ImageOut
 			case kernel.Error:
-				c.appendOutput(notebook.Error, e.Text)
-			case kernel.Info:
-				c.appendOutput(notebook.Info, e.Text)
+				kind = notebook.Error
+			}
+			if e.ID != "" {
+				c.setOutput(kind, e.Text, e.ID)
+			} else {
+				c.appendOutput(kind, e.Text)
 			}
 		}
 	}
@@ -929,6 +972,7 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 	}
 
 	m.running = nil
+	m.stdin.close()
 	if c != nil {
 		c.duration = time.Since(c.started)
 		switch {

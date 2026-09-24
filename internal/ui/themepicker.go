@@ -62,6 +62,7 @@ func (m *Model) applyTheme(name string) {
 	is.Blurred.Placeholder = lipgloss.NewStyle().Foreground(colSubtle)
 	m.input.SetStyles(is)
 	m.picker.filter.SetStyles(is)
+	m.stdin.input.SetStyles(is)
 
 	// Rendered markdown and outputs are cached with their styles baked in.
 	for _, c := range m.cells {

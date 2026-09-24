@@ -67,10 +67,11 @@ func (w *lineWriter) write(s string) {
 // information before the cell has ever been run.
 func (k *Kernel) CompletionSource(cellID, src string, row, col int, resolve func(name string) (string, bool)) CompletionSource {
 	lines := strings.Split(src, "\n")
-	// Blank shell commands and magics, preserving positions.
+	// Blank shell commands and magics, preserving positions. A cell magic
+	// (%%writefile, %%bash...) isn't Go at all.
+	_, _, _, isMagic := cellMagic(src)
 	for i, l := range lines {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "!") || strings.HasPrefix(t, "%") {
+		if isMagic || commandLine(l) != "" {
 			lines[i] = strings.Repeat(" ", len(l))
 		}
 	}

@@ -108,19 +108,57 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
   `CacheErr` does not store failed results. `%cache clear resp` forces a recompute.
 - Imports are added automatically, and third-party modules are fetched on first use.
 - `Display(v...)` and `DisplayMarkdown(s)` produce rich output.
+- Images are drawn in the output: `Display` an `image.Image` (or end the cell
+  with one), or pass PNG bytes to `DisplayPNG(data)`. They are drawn with
+  colored half blocks (two pixels per character), scaled to fit the cell, and
+  saved in the notebook as `image/png`, so Jupyter shows them too. Images in
+  notebooks from Jupyter (PNG, JPEG, GIF) are shown as well. `gopyter run`
+  draws them when its output is a color terminal and prints `[image WxH]`
+  otherwise.
+- `DisplayID(id, v...)` and `DisplayMarkdownID(id, s)` replace the output they
+  showed earlier with the same id, for animations and progress.
+- Program output keeps its colors, and is shown like a terminal would show it:
+  `\r`, cursor movement and clearing the screen work, so progress bars and
+  redrawing demos look right.
+- Programs can read their standard input. While a cell runs, an input line
+  appears under it: press `enter` on the cell (or `alt+i`, or click it), type,
+  and press `enter` to send a line or `ctrl+d` to end the input. `gopyter run`
+  passes its own standard input to the programs.
 
 | Cell command     | Effect                                        |
 |------------------|-----------------------------------------------|
-| `!cmd`           | run a shell command (e.g. `!go get pkg@v1`)    |
+| `!cmd`           | run a shell command in the kernel workspace (e.g. `!go get pkg@v1`); a trailing `\` continues it |
 | `%reset`         | forget all declarations and saved variables   |
+| `%reset go.mod`  | start the workspace's `go.mod` over           |
 | `%env K=V`       | set environment variables for your programs   |
 | `%args a b`      | set program arguments                         |
+| `%% [args]`      | call `flag.Parse()` first, with these arguments for this cell (also `%main`) |
+| `%exec fn [args]`| run `fn()` after parsing flags                 |
+| `%test [flags]`  | build with `go test` and run the cell's tests and benchmarks |
+| `%goflags [flags]` | show or set extra `go build` flags (`-race`, `-tags=x`); `%goflags ""` clears them |
+| `%autoget` / `%noautoget` | fetch missing modules automatically, or not |
+| `%capture [-a] file` | also write the cell's output to a file   |
 | `%ls`            | list persisted declarations                   |
 | `%rm name...`    | forget declarations or imports                |
 | `%cache`         | list cached values                            |
 | `%cache clear [key...]` | delete cached values                   |
 | `%workspace`     | print the kernel workspace directory          |
+| `%version`       | print the gopyter and Go versions             |
 | `%help`          | show this list                                |
+
+Cell magics must be the first line of a cell and take the rest of it:
+
+| Cell magic              | Effect                                      |
+|-------------------------|---------------------------------------------|
+| `%%writefile [-a] file` | write the cell to a file (`-a` appends)     |
+| `%%bash`, `%%sh`        | run the cell as a shell script              |
+| `%%script cmd`          | run `cmd` with the cell as its input (e.g. `%%script python3`) |
+
+Files and scripts are relative to the directory programs run in, so a program
+can read what `%%writefile` wrote. Commands can also be written as
+`//gonb:%...`, and `!*cmd` is accepted like `!cmd`, so GoNB notebooks run
+unchanged. Each cell can have its own `func init()`; GoNB's `init_xxx()`
+functions work too.
 
 ## Keys
 
@@ -133,6 +171,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `ctrl+r` or `shift+enter`    | run cell and advance                     |
 | `ctrl+j` or `ctrl+enter`     | run cell                                 |
 | `A` / `R` / `ctrl+c`         | run all / restart kernel / interrupt     |
+| `alt+i`                      | type input for the running program       |
 | `j` `k` `g` `G`              | move selection                           |
 | `a` / `b`                    | insert cell above / below                |
 | `dd` / `z`                   | delete / undo delete                     |

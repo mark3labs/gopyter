@@ -46,16 +46,19 @@ type Cell struct {
 	outKey      outputKey
 	outLines    []string
 	outResultAt int
+	// outRev counts changes to outputs, which aren't always appends:
+	// DisplayID replaces an output in place.
+	outRev int
 }
 
-// outputKey fingerprints the outputs; they are append-only between resets.
+// outputKey fingerprints the outputs.
 type outputKey struct {
-	width, n, last int
-	kind           notebook.OutputKind
+	width, n, last, rev int
+	kind                notebook.OutputKind
 }
 
 func (c *Cell) outputFingerprint(width int) outputKey {
-	k := outputKey{width: width, n: len(c.outputs)}
+	k := outputKey{width: width, n: len(c.outputs), rev: c.outRev}
 	if k.n > 0 {
 		k.last = len(c.outputs[k.n-1].Text)
 		k.kind = c.outputs[k.n-1].Kind
@@ -114,10 +117,12 @@ func (c *Cell) setKind(kind notebook.CellType) {
 	c.ed.SetLang(langFor(kind))
 	if kind != notebook.Code {
 		c.outputs, c.count, c.status = nil, 0, statusIdle
+		c.outRev++
 	}
 }
 
 func (c *Cell) appendOutput(kind notebook.OutputKind, text string) {
+	c.outRev++
 	if n := len(c.outputs); n > 0 && (kind == notebook.Stdout || kind == notebook.Stderr) && c.outputs[n-1].Kind == kind {
 		c.outputs[n-1].Text += text
 		// Keep memory bounded for chatty programs.
@@ -128,6 +133,19 @@ func (c *Cell) appendOutput(kind notebook.OutputKind, text string) {
 		return
 	}
 	c.outputs = append(c.outputs, notebook.Output{Kind: kind, Text: text})
+}
+
+// setOutput shows an updatable output (DisplayID): it replaces the
+// output with the same id, or is appended the first time.
+func (c *Cell) setOutput(kind notebook.OutputKind, text, id string) {
+	c.outRev++
+	for i := range c.outputs {
+		if c.outputs[i].ID == id {
+			c.outputs[i].Kind, c.outputs[i].Text = kind, text
+			return
+		}
+	}
+	c.outputs = append(c.outputs, notebook.Output{Kind: kind, Text: text, ID: id})
 }
 
 // cellRender is the rendered form of a cell plus layout metadata.

@@ -12,6 +12,7 @@ type keyMap struct {
 	RunInsert  key.Binding
 	Save       key.Binding
 	Interrupt  key.Binding
+	Input      key.Binding // focus the running program's input
 
 	// Command mode
 	Up, Down     key.Binding
@@ -59,6 +60,7 @@ func newKeyMap() keyMap {
 		RunInsert:  b([]string{"alt+enter"}, "alt+↵", "run & insert"),
 		Save:       b([]string{"ctrl+s"}, "^s", "save"),
 		Interrupt:  b([]string{"ctrl+c"}, "^c", "interrupt"),
+		Input:      b([]string{"alt+i"}, "alt+i", "type program input"),
 
 		Up:           b([]string{"up", "k"}, "↑/k", "up"),
 		Down:         b([]string{"down", "j"}, "↓/j", "down"),
@@ -130,6 +132,11 @@ func hint(keys, desc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
 }
 
+// stdinShort returns the footer hints while typing program input.
+func (k keyMap) stdinShort() []key.Binding {
+	return []key.Binding{hint("↵", "send line"), hint("^d", "end input"), hint("esc", "leave"), k.Interrupt}
+}
+
 // vimNormalShort returns the footer hints for vim normal mode.
 func (k keyMap) vimNormalShort() []key.Binding {
 	return []key.Binding{
@@ -179,7 +186,7 @@ func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 
 func (k keyMap) baseHelp() []helpSection {
 	return []helpSection{
-		{"Running", []key.Binding{k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart}},
+		{"Running", []key.Binding{k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Input, k.Restart}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
 		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},

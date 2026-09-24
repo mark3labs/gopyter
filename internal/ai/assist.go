@@ -51,8 +51,8 @@ const cellRules = `How cells work:
 - A top-level "x := ..." also stays available to later cells.
 - A trailing bare expression is displayed as the cell's result.
 - Standard library imports are added automatically when a package is used, so an import line is optional.
-- Display(v) and DisplayMarkdown(s) show rich output.
-- Lines starting with ! are shell commands and lines starting with % are magics. Keep them as they are.
+- Display(v) and DisplayMarkdown(s) show rich output. Display draws an image.Image as a picture; DisplayPNG(data) shows PNG bytes. DisplayID(id, v) and DisplayMarkdownID(id, s) replace their earlier output with the same id (animations, progress).
+- Lines starting with ! are shell commands and lines starting with % are magics (e.g. %test runs the cell's Test functions with go test). A first line starting with %% (%%writefile, %%bash) makes the whole cell a file or script, not Go. Keep them as they are.
 - Error positions look like In[3]:2:5 (cell, line, column).
 
 Identifiers from earlier cells only exist once those cells have run in this session; the prompt lists the ones that currently do, and marks cells that haven't run.`

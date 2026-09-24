@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 
@@ -29,6 +30,18 @@ var (
 	version = ""
 	commit  = ""
 )
+
+// appVersion is the version reported by %version: the -ldflags one, else
+// the module version from the build info, like fang does.
+func appVersion() string {
+	if version != "" {
+		return version
+	}
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" {
+		return bi.Main.Version
+	}
+	return "dev"
+}
 
 func loadNotebook(path string) (*notebook.Notebook, error) {
 	if path == "" {
@@ -138,7 +151,7 @@ func runCmd(workdir *string) *cobra.Command {
 			if dir, err := os.Getwd(); err == nil {
 				k.RunDir = dir
 			}
-			failed := runner.Run(cmd.Context(), k, nb, cmd.OutOrStdout(), failFast)
+			failed := runner.Run(cmd.Context(), k, nb, cmd.OutOrStdout(), cmd.InOrStdin(), failFast)
 			if save {
 				if err := nb.Save(args[0]); err != nil {
 					return err
@@ -239,6 +252,7 @@ func closeKernel(k *kernel.Kernel) {
 }
 
 func main() {
+	kernel.Version = appVersion()
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := fang.Execute(ctx, rootCmd(), fang.WithVersion(version), fang.WithCommit(commit)); err != nil {

@@ -40,13 +40,20 @@ const (
 	Markdown // text/markdown produced by DisplayMarkdown
 	Error    // compile or kernel error
 	Info     // kernel informational message
+	Image    // base64 image/png produced by Display (of an image.Image) or DisplayPNG
 )
 
 // Event is a piece of output streamed from an execution.
 type Event struct {
 	Kind EventKind
 	Text string
+	// ID is set for output shown with DisplayID or DisplayMarkdownID:
+	// a later event with the same ID replaces the earlier output.
+	ID string
 }
+
+// Version is the gopyter version reported by %version.
+var Version = "dev"
 
 // ErrCompile is returned when the cell fails to compile.
 var ErrCompile = errors.New("compilation failed")
@@ -71,6 +78,8 @@ type Kernel struct {
 	resolved  []*Import
 	env       map[string]string
 	args      []string
+	goflags   []string // extra go build flags (%goflags)
+	noAutoGet bool     // %noautoget: don't fetch missing modules
 	goVersion string
 }
 
@@ -81,10 +90,14 @@ package main
 // notebook (e.g. a variable called url or bytes).
 import (
 	gopyter_bytes "bytes"
+	gopyter_base64 "encoding/base64"
 	gopyter_gob "encoding/gob"
 	gopyter_hex "encoding/hex"
 	gopyter_json "encoding/json"
+	gopyter_flag "flag"
 	gopyter_fmt "fmt"
+	gopyter_image "image"
+	gopyter_png "image/png"
 	gopyter_url "net/url"
 	gopyter_os "os"
 	gopyter_filepath "path/filepath"
@@ -279,26 +292,102 @@ func gopyterVarsDone() {
 	}
 }
 
-func gopyterEmit(mime, data string) {
+// gopyterEmit sends a rich result to the kernel; plain is printed instead
+// when there's no kernel to receive it (e.g. on Windows). Outputs with an
+// id replace the previous output with that id.
+func gopyterEmit(mime, data, plain, id string) {
 	gopyterMu.Lock()
 	defer gopyterMu.Unlock()
-	b, _ := gopyter_json.Marshal(map[string]string{"mime": mime, "data": data})
+	m := map[string]string{"mime": mime, "data": data}
+	if id != "" {
+		m["id"] = id
+	}
+	b, _ := gopyter_json.Marshal(m)
 	if _, err := gopyterOut.Write(append(b, '\n')); err != nil {
-		gopyter_fmt.Println(data)
+		gopyter_fmt.Println(plain)
 	}
 }
 
-// Display shows the given values as the cell's result.
+// gopyterParseFlags parses the command line, for cells using %% or %exec.
+func gopyterParseFlags() {
+	if !gopyter_flag.Parsed() {
+		gopyter_flag.Parse()
+	}
+}
+
+// Display shows the given values as the cell's result. Images
+// (image.Image) are drawn in the output.
 func Display(vs ...any) {
+	var parts []string
+	emitted := false
+	flush := func() {
+		if len(parts) > 0 {
+			s := gopyter_strings.Join(parts, ", ")
+			gopyterEmit("text/plain", s, s, "")
+			parts, emitted = nil, true
+		}
+	}
+	for _, v := range vs {
+		if img, ok := v.(gopyter_image.Image); ok && !gopyterIsNil(v) {
+			flush()
+			gopyterDisplayImage(img, "")
+			emitted = true
+			continue
+		}
+		parts = append(parts, gopyter_fmt.Sprintf("%+v", v))
+	}
+	flush()
+	if !emitted {
+		gopyterEmit("text/plain", "", "", "")
+	}
+}
+
+// DisplayID is like Display, but the output can be updated: calling it
+// again with the same id replaces what the earlier call showed, e.g. to
+// animate an image or show progress. A single image is drawn; other values
+// are shown as text.
+func DisplayID(id string, vs ...any) {
+	if len(vs) == 1 {
+		if img, ok := vs[0].(gopyter_image.Image); ok && !gopyterIsNil(vs[0]) {
+			gopyterDisplayImage(img, id)
+			return
+		}
+	}
 	parts := make([]string, len(vs))
 	for i, v := range vs {
 		parts[i] = gopyter_fmt.Sprintf("%+v", v)
 	}
-	gopyterEmit("text/plain", gopyter_strings.Join(parts, ", "))
+	s := gopyter_strings.Join(parts, ", ")
+	gopyterEmit("text/plain", s, s, id)
+}
+
+// DisplayMarkdownID is like DisplayMarkdown, but calling it again with
+// the same id replaces the earlier output (see DisplayID).
+func DisplayMarkdownID(id, s string) { gopyterEmit("text/markdown", s, s, id) }
+
+// gopyterIsNil reports a nil pointer stored in an interface, like a nil
+// *image.RGBA, whose methods would panic.
+func gopyterIsNil(v any) bool {
+	rv := gopyter_reflect.ValueOf(v)
+	return rv.Kind() == gopyter_reflect.Pointer && rv.IsNil()
+}
+
+func gopyterDisplayImage(img gopyter_image.Image, id string) {
+	var buf gopyter_bytes.Buffer
+	if err := gopyter_png.Encode(&buf, img); err != nil {
+		gopyter_fmt.Fprintf(gopyter_os.Stderr, "gopyter: can't display image: %v\n", err)
+		return
+	}
+	gopyterEmit("image/png", gopyter_base64.StdEncoding.EncodeToString(buf.Bytes()), "[image/png]", id)
+}
+
+// DisplayPNG shows PNG encoded image data in the cell's output.
+func DisplayPNG(data []byte) {
+	gopyterEmit("image/png", gopyter_base64.StdEncoding.EncodeToString(data), "[image/png]", "")
 }
 
 // DisplayMarkdown renders s as markdown in the cell's output.
-func DisplayMarkdown(s string) { gopyterEmit("text/markdown", s) }
+func DisplayMarkdown(s string) { gopyterEmit("text/markdown", s, s, "") }
 `
 
 // New creates a kernel. If dir is empty a temporary workspace is created.
@@ -480,17 +569,36 @@ func (k *Kernel) environ() []string {
 
 // Execute runs a cell. cellID identifies the cell (re-executing a cell
 // replaces its previous declarations), name is used in error positions.
-// Output is streamed through emit; calls to emit are serialized.
+// Output is streamed through emit; calls to emit are serialized. The
+// cell's programs get no input; see ExecuteInput.
 func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit func(Event)) error {
+	return k.ExecuteInput(ctx, cellID, name, src, nil, emit)
+}
+
+// ExecuteInput is Execute with stdin as the standard input of the cell's
+// program and shell commands (nil for none).
+func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, stdin io.Reader, emit func(Event)) error {
 	// Output arrives from several goroutines (stdout, stderr, display);
 	// serialize it so emit never needs to be safe for concurrent use.
+	// %capture copies it to a file, under the same lock.
 	var emitMu sync.Mutex
+	var capture *os.File
 	unsafeEmit := emit
 	emit = func(e Event) {
 		emitMu.Lock()
 		defer emitMu.Unlock()
 		unsafeEmit(e)
+		if capture != nil {
+			writeCapture(capture, e)
+		}
 	}
+	defer func() {
+		emitMu.Lock()
+		defer emitMu.Unlock()
+		if capture != nil {
+			_ = capture.Close() // best effort: the output was shown anyway
+		}
+	}()
 
 	pc, err := parseCell(cellID, name, src)
 	if err != nil {
@@ -499,7 +607,19 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 	}
 
 	for _, c := range pc.commands {
-		if err := k.runCommand(ctx, c, emit); err != nil {
+		if f, ok, err := k.openCapture(c); ok {
+			if err != nil {
+				return err
+			}
+			emitMu.Lock()
+			if capture != nil {
+				_ = capture.Close() // a second %capture wins
+			}
+			capture = f
+			emitMu.Unlock()
+			continue
+		}
+		if err := k.runCommand(ctx, c, stdin, emit); err != nil {
 			return err
 		}
 	}
@@ -507,7 +627,16 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 		return nil
 	}
 
-	mainPath := filepath.Join(k.Dir, "main.go")
+	// A %test cell is built with go test, from a _test.go file. Only one
+	// of the two files may exist, or the declarations would clash.
+	mainPath, stale := filepath.Join(k.Dir, "main.go"), filepath.Join(k.Dir, "main_test.go")
+	if pc.test {
+		mainPath, stale = stale, mainPath
+	}
+	if err := os.Remove(stale); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
 	var decls []*Decl
 	var imps, resolved []*Import
 	write := func() error {
@@ -539,9 +668,17 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 	if runtime.GOOS == "windows" {
 		bin += ".exe"
 	}
+	k.mu.Lock()
+	build := []string{"build"}
+	if pc.test {
+		build = []string{"test", "-c"}
+	}
+	build = append(append(build, k.goflags...), "-o", bin, ".")
+	autoGet := !k.noAutoGet
+	k.mu.Unlock()
 	fetched := false
 	for {
-		out, err := k.goCmd(ctx, "build", "-o", bin, ".").CombinedOutput()
+		out, err := k.goCmd(ctx, build...).CombinedOutput()
 		if ctx.Err() != nil {
 			return ErrInterrupted
 		}
@@ -556,7 +693,7 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 			}
 			continue
 		}
-		if missing := missingModules(string(out)); !fetched && len(missing) > 0 {
+		if missing := missingModules(string(out)); autoGet && !fetched && len(missing) > 0 {
 			fetched = true
 			for _, p := range missing {
 				emit(Event{Kind: Info, Text: "go get " + p})
@@ -579,13 +716,20 @@ func (k *Kernel) Execute(ctx context.Context, cellID, name, src string, emit fun
 	k.decls, k.imports, k.resolved = decls, imps, resolved
 	args := append([]string(nil), k.args...)
 	k.mu.Unlock()
+	switch {
+	case pc.test:
+		args = pc.testArgs()
+	case pc.hasArgs:
+		args = pc.args
+	}
 
 	if err := os.Remove(k.varsStatusPath()); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	err = k.run(ctx, bin, args, emit)
-	if pc.userMain == "" {
-		// A cell's own func main doesn't save the variables.
+	err = k.run(ctx, bin, args, stdin, emit)
+	if pc.userMain == "" && !pc.test {
+		// A cell's own func main doesn't save the variables, and
+		// neither does a test binary, which never calls main.
 		k.afterRun(cellID, emit)
 	}
 	return err
@@ -666,6 +810,16 @@ func (k *Kernel) generate(decls []*Decl, imps []*Import, pc *parsedCell) (string
 	} else {
 		// Deferred so the variables are also saved when the cell panics.
 		body.WriteString("func main() {\ndefer gopyterSaveVars()\n")
+		if pc.parseFlags {
+			body.WriteString("gopyterParseFlags()\n")
+		}
+		if pc.exec != "" {
+			// Positioned at the %exec line, for errors like an unknown
+			// function.
+			body.WriteString(lineDirective(pc.name, pc.execLine, 1))
+			body.WriteString(pc.exec)
+			body.WriteString("()\n")
+		}
 		body.WriteString(pc.body)
 		body.WriteString("\n}\n")
 	}
@@ -725,10 +879,11 @@ func cleanErrors(s, dir string) string {
 	return strings.Join(out, "\n")
 }
 
-func (k *Kernel) run(ctx context.Context, bin string, args []string, emit func(Event)) error {
+func (k *Kernel) run(ctx context.Context, bin string, args []string, stdin io.Reader, emit func(Event)) error {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = k.RunDir
 	cmd.Env = k.environ()
+	cmd.Stdin = stdin
 	cmd.WaitDelay = 2 * time.Second
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -765,15 +920,18 @@ func (k *Kernel) run(ctx context.Context, bin string, args []string, emit func(E
 		sc := bufio.NewScanner(dr)
 		sc.Buffer(make([]byte, 64*1024), 64*1024*1024)
 		for sc.Scan() {
-			var m struct{ Mime, Data string }
+			var m struct{ Mime, Data, ID string }
 			if json.Unmarshal(sc.Bytes(), &m) != nil {
 				continue
 			}
 			kind := Result
-			if m.Mime == "text/markdown" {
+			switch m.Mime {
+			case "text/markdown":
 				kind = Markdown
+			case "image/png":
+				kind = Image
 			}
-			emit(Event{Kind: kind, Text: m.Data})
+			emit(Event{Kind: kind, Text: m.Data, ID: m.ID})
 		}
 		if err := sc.Err(); err != nil {
 			emit(Event{Kind: Error, Text: "display output: " + err.Error()})
@@ -805,45 +963,93 @@ func pump(r io.Reader, kind EventKind, emit func(Event)) {
 	}
 }
 
-// runCommand executes a shell command or magic.
-func (k *Kernel) runCommand(ctx context.Context, c Command, emit func(Event)) error {
+// runShell runs script with the system shell in dir.
+func (k *Kernel) runShell(ctx context.Context, script, dir string, stdin io.Reader, emit func(Event)) error {
+	cmd := exec.CommandContext(ctx, "sh", "-c", script)
+	if runtime.GOOS == "windows" {
+		cmd = exec.CommandContext(ctx, "cmd", "/C", script)
+	}
+	cmd.Dir = dir
+	cmd.Env = append(k.environ(), "GOWORK=off")
+	cmd.Stdin = stdin
+	cmd.WaitDelay = 2 * time.Second
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); pump(stdout, Stdout, emit) }()
+	go func() { defer wg.Done(); pump(stderr, Stderr, emit) }()
+	wg.Wait()
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ErrInterrupted
+		}
+		return err
+	}
+	return nil
+}
+
+// runCommand executes a shell command, magic or cell magic.
+func (k *Kernel) runCommand(ctx context.Context, c Command, stdin io.Reader, emit func(Event)) error {
 	if !c.Magic {
-		shell, flag := "sh", "-c"
-		if runtime.GOOS == "windows" {
-			shell, flag = "cmd", "/C"
-		}
-		cmd := exec.CommandContext(ctx, shell, flag, c.Text)
-		cmd.Dir = k.Dir
-		cmd.Env = append(k.environ(), "GOWORK=off")
-		stdout, _ := cmd.StdoutPipe()
-		stderr, _ := cmd.StderrPipe()
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() { defer wg.Done(); pump(stdout, Stdout, emit) }()
-		go func() { defer wg.Done(); pump(stderr, Stderr, emit) }()
-		wg.Wait()
-		if err := cmd.Wait(); err != nil {
-			if ctx.Err() != nil {
-				return ErrInterrupted
-			}
+		err := k.runShell(ctx, c.Text, k.Dir, stdin, emit)
+		if err != nil && !errors.Is(err, ErrInterrupted) {
 			return fmt.Errorf("!%s: %w", c.Text, err)
 		}
-		return nil
+		return err
+	}
+	if c.Cell {
+		return k.cellMagic(ctx, c, emit)
 	}
 
-	fields := strings.Fields(c.Text)
+	fields, err := splitArgs(c.Text)
+	if err != nil {
+		return fmt.Errorf("%%%s: %w", c.Text, err)
+	}
 	if len(fields) == 0 {
 		return nil
 	}
 	switch fields[0] {
 	case "reset":
+		if len(fields) > 1 && fields[1] == "go.mod" {
+			return k.resetGoMod(ctx, emit)
+		}
 		if err := k.Reset(); err != nil {
 			return err
 		}
 		emit(Event{Kind: Info, Text: "kernel state cleared"})
+	case "goflags":
+		k.mu.Lock()
+		if len(fields) > 1 {
+			// GoNB: %goflags "" clears them.
+			k.goflags = slices.DeleteFunc(slices.Clone(fields[1:]), func(s string) bool { return s == "" })
+		}
+		flags := strings.Join(k.goflags, " ")
+		k.mu.Unlock()
+		if flags == "" {
+			flags = "(none)"
+		}
+		emit(Event{Kind: Info, Text: "go build flags: " + flags})
+	case "autoget", "noautoget":
+		k.mu.Lock()
+		k.noAutoGet = fields[0] == "noautoget"
+		k.mu.Unlock()
+		if fields[0] == "autoget" {
+			emit(Event{Kind: Info, Text: "missing modules are fetched with go get"})
+		} else {
+			emit(Event{Kind: Info, Text: "missing modules are not fetched: use !go get"})
+		}
+	case "version":
+		emit(Event{Kind: Stdout, Text: "gopyter " + Version + ", " + k.goVersion + "\n"})
 	case "env":
 		if len(fields) == 1 {
 			k.mu.Lock()
@@ -927,21 +1133,41 @@ func (k *Kernel) cacheMagic(args []string, emit func(Event)) error {
 // MagicHelp documents the special cell commands.
 const MagicHelp = "## Cell commands\n\n" +
 	"| Command | Description |\n|---|---|\n" +
-	"| `!cmd` | run a shell command in the kernel workspace (e.g. `!go get github.com/foo/bar`) |\n" +
+	"| `!cmd` | run a shell command in the kernel workspace (e.g. `!go get github.com/foo/bar`); `!*cmd` is the same, and a trailing `\\` continues the command on the next line |\n" +
 	"| `%reset` | forget all declarations and saved variables |\n" +
+	"| `%reset go.mod` | start the workspace's `go.mod` over, dropping its modules |\n" +
 	"| `%env KEY=VALUE` | set environment variables for executed programs |\n" +
 	"| `%args a b c` | set command line arguments for executed programs |\n" +
+	"| `%%` or `%main [args]` | parse flags (`flag.Parse()`) first, with these arguments for this cell only |\n" +
+	"| `%exec fn [args]` | run `fn()` instead of statements, after parsing flags |\n" +
+	"| `%test [flags]` | build with `go test` and run the cell's `Test`/`Benchmark` functions (or pass flags, e.g. `-test.run=.`) |\n" +
+	"| `%goflags [flags]` | show or set extra `go build` flags, e.g. `-race` or `-tags=x`; `%goflags \"\"` clears them |\n" +
+	"| `%autoget`, `%noautoget` | fetch missing modules automatically (the default), or not |\n" +
+	"| `%capture [-a] file` | also write this cell's output to a file (`-a` appends) |\n" +
 	"| `%ls` | list persisted declarations |\n" +
 	"| `%rm name...` | forget declarations (a type's methods too) or imports |\n" +
 	"| `%cache` | list values stored by `Cache`/`CacheErr` |\n" +
 	"| `%cache clear [key...]` | delete cached values so they are recomputed |\n" +
-	"| `%workspace` | print the kernel workspace directory |\n\n" +
+	"| `%workspace` | print the kernel workspace directory |\n" +
+	"| `%version` | print the gopyter and Go versions |\n\n" +
+	"Cell magics take the rest of the cell, and must be its first line:\n\n" +
+	"| Cell magic | Description |\n|---|---|\n" +
+	"| `%%writefile [-a] file` | write the cell to a file (`-a` appends) |\n" +
+	"| `%%bash`, `%%sh` | run the cell as a shell script |\n" +
+	"| `%%script cmd` | run `cmd` with the cell as its input, e.g. `%%script python3` |\n\n" +
+	"Magics can also be written as `//gonb:%...`, as in GoNB. " +
+	"Files and scripts are relative to the directory programs run in.\n\n" +
 	"Top level `func`, `type`, `var`, `const` and `import` declarations persist across cells. " +
 	"Everything else runs inside `main()`. A trailing expression is displayed as the result. " +
+	"Each cell can have its own `func init()` (or GoNB's `init_xxx()`). " +
 	"Variables declared with `:=` at the top level of a cell are kept too: their values are saved " +
 	"with `encoding/gob` when the cell ends and restored in later cells (exported fields only; " +
 	"values that can't be saved, like channels or mutexes, are not kept). " +
-	"Use `Display(v)` and `DisplayMarkdown(s)` for rich output.\n\n" +
+	"Use `Display(v)` and `DisplayMarkdown(s)` for rich output; `Display` draws an `image.Image` " +
+	"(so does a trailing image expression), and `DisplayPNG(data)` shows PNG bytes. " +
+	"`DisplayID(id, v)` and `DisplayMarkdownID(id, s)` replace their earlier output with the same id, " +
+	"for animations and progress. Programs can read their standard input: type it in the line " +
+	"under the running cell.\n\n" +
 	"Each cell runs in a fresh process, so a persisted `var` is re-initialized every time. " +
 	"Wrap expensive initializers to compute them once: " +
 	"`var resp, err = CacheErr(\"resp\", func() (*T, error) { ... })`."

@@ -22,6 +22,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
+| `internal/termimg`  | draws images as half-block text for image outputs (TUI and `run`)        |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
 | `internal/lsp`      | minimal JSON-RPC/LSP client (stdio)                                       |
 | `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup |
@@ -89,8 +90,22 @@ concatenation in WriteString") count as issues to fix too.
 - A cell's declarations only replace earlier ones after a successful build.
 - `Execute` serializes calls to `emit`. Callers may assume `emit` is never
   called concurrently.
-- Rich output (`Display`, `DisplayMarkdown`) goes over file descriptor 3 as
-  JSON lines. Windows falls back to stdout.
+- Rich output (`Display`, `DisplayMarkdown`, `DisplayPNG`, `DisplayID`,
+  `DisplayMarkdownID`) goes over file descriptor 3 as JSON lines. Windows
+  falls back to stdout. `Display` sends an `image.Image` as base64
+  `image/png` (the `Image` event, `ImageOut` output); the UI decodes and
+  draws it with `termimg` when rendering outputs (cached with the other
+  output lines). Events with an `ID` replace the output with that ID
+  (`Cell.setOutput`); the ID isn't saved to the notebook.
+- Magics that change how a cell is built (`%%`/`%main` args, `%exec`,
+  `%test`) are parsed in `parseCell` (`addMagic`); the others run as
+  commands before the code (`runCommand`, `magic.go`). Cell magics
+  (`%%writefile`, `%%bash`...) must be the first line and make the whole
+  cell a command. `%test` cells build `main_test.go` with `go test -c`;
+  only one of `main.go`/`main_test.go` may exist.
+- `ExecuteInput` takes the program's stdin. The UI feeds it from a pipe
+  (`stdin.go`): the input line under the running cell writes to it and
+  `ctrl+d` closes it.
 - `CompletionSource` mirrors a cell into a separate `gopyter_complete`
   sub-package. It copies chunks verbatim at their original columns, so cursor
   positions map back exactly. Preserve that property.
@@ -130,6 +145,10 @@ concatenation in WriteString") count as issues to fix too.
   `watch.gen` so our own writes and stale polls are ignored. Reloads wait
   while cells run or an overlay is open. `applyReload` reuses cells matched by
   ID (or by position and source for ID-less files), keeping undo and caches.
+- Program output (stdout/stderr) is interpreted by a small terminal
+  emulator (`termout.go`): SGR styles, `\r`, cursor movement and erasing.
+  Output without escape codes skips it. Lines are wrapped when drawn and
+  each is self-contained (styles reopened and reset per line).
 - Completion (`completion.go`) is debounced, and responses are matched by
   sequence number. Popup keys are handled before editor keys in
   `handleKey`.
