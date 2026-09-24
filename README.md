@@ -77,8 +77,22 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
 
 - Top-level `func`, `type`, `var`, `const` and `import` declarations **persist**.
   Re-running a cell replaces what it declared. Everything else runs inside a
-  generated `main()` in a fresh process, so local variables don't carry over;
-  keep shared state in package-level `var`s.
+  generated `main()` in a fresh process.
+- Variables declared with `:=` at the top level of a cell **carry over** too:
+
+  ```go
+  a := 1           // cell 1
+  fmt.Println(a)   // cell 2 prints 1
+  ```
+
+  gopyter declares them at package level. Each cell's program restores their
+  values when it starts and saves them with `encoding/gob` when it ends, even
+  after a panic, so changes made in later cells stick. Only what gob can encode
+  is kept, which means exported struct fields. A non-nil `error` keeps its
+  message. Values gob can't encode (channels, mutexes, `*regexp.Regexp`, ...)
+  aren't kept, and gopyter says so. Pointers are restored as copies.
+  `f := func(...) {...}` becomes a persisted declaration. Variables inside
+  blocks (`for`, `if`, ...) stay local.
 - A persisted `var` is re-initialized in every later cell (each cell is a new
   process). To compute an expensive value once, wrap it in `Cache` or
   `CacheErr`, which store the result (gob-encoded, so exported fields only) in
@@ -97,7 +111,7 @@ For a guided tour: `gopyter examples/tour.ipynb`, then press `A` to run all cell
 | Cell command     | Effect                                        |
 |------------------|-----------------------------------------------|
 | `!cmd`           | run a shell command (e.g. `!go get pkg@v1`)    |
-| `%reset`         | forget all declarations                       |
+| `%reset`         | forget all declarations and saved variables   |
 | `%env K=V`       | set environment variables for your programs   |
 | `%args a b`      | set program arguments                         |
 | `%ls`            | list persisted declarations                   |

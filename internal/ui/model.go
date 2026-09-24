@@ -923,8 +923,11 @@ func (m *Model) interrupt() tea.Cmd {
 
 func (m *Model) restart() tea.Cmd {
 	m.interrupt()
-	m.k.Reset()
+	err := m.k.Reset()
 	m.counter = 0
+	if err != nil {
+		return m.setStatus(statusError, "kernel restarted, but saved variables remain: %v", err)
+	}
 	return m.setStatus(statusSuccess, "kernel restarted · all declarations cleared")
 }
 

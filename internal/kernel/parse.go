@@ -20,7 +20,9 @@ type Decl struct {
 	Raw string
 	// CellID is the id of the cell that contributed the declaration.
 	CellID string
-	seq    int
+	// Var is set for a variable hoisted from a top-level := statement. It
+	// is declared in gopyter_vars.go rather than main.go.
+	Var *VarInfo
 }
 
 // Import is an import spec that persists across cell executions.
@@ -46,7 +48,45 @@ type parsedCell struct {
 	userMain string // user-provided func main, if any
 	commands []Command
 	hasCode  bool
+
+	name    string    // name used in //line directives
+	src     string    // cell source with commands blanked
+	stmts   []chunk   // statement chunks, in order
+	defines []*define // top-level := statements
 }
+
+// define is a top-level "x, y := ..." statement of a cell. Its variables
+// can be hoisted to package level so that later cells see them.
+type define struct {
+	stmt   int        // index in parsedCell.stmts
+	tok    int        // offset of ":=" in the cell source
+	idents []defIdent // left-hand side identifiers, except "_"
+	// fn is set for "f := func(...) {...}": the literal's range in the
+	// cell source. Evaluating a literal has no side effects, so it can be
+	// hoisted as a regular declaration instead of a saved value.
+	fn *span
+}
+
+// defIdent is an identifier on the left of a define, at a cell position.
+type defIdent struct {
+	name      string
+	line, col int
+}
+
+// span is a range of the cell source starting at line:col.
+type span struct {
+	start, end int
+	line, col  int
+}
+
+// hoist tells how a define is emitted.
+type hoist int
+
+const (
+	hoistNone hoist = iota // keep the local variables
+	hoistVar               // assign package-level variables (":=" becomes " =")
+	hoistFunc              // the statement became a declaration: drop it
+)
 
 type chunk struct {
 	decl       bool
@@ -180,26 +220,55 @@ func parseCell(cellID, name, src string) (*parsedCell, error) {
 	}
 	src = strings.Join(lines, "\n")
 
+	pc.name, pc.src = name, src
 	chunks := splitChunks(src)
-	var body, plain strings.Builder
-	var stmts []chunk
 	for _, c := range chunks {
 		if c.decl {
 			if err := pc.addDecl(cellID, name, src, c); err != nil {
 				return nil, err
 			}
 		} else {
-			stmts = append(stmts, c)
+			if d := parseDefine(src, c); d != nil {
+				d.stmt = len(pc.stmts)
+				pc.defines = append(pc.defines, d)
+			}
+			pc.stmts = append(pc.stmts, c)
 		}
 	}
-	for i, c := range stmts {
-		text := src[c.start:c.end]
-		stmt := lineDirective(name, c.line, c.col) + text + "\n"
+	pc.render(nil)
+	pc.hasCode = len(chunks) > 0
+	if pc.userMain != "" && len(pc.stmts) > 0 {
+		return nil, fmt.Errorf("%s: cell defines func main() and also has top-level statements", name)
+	}
+	return pc, nil
+}
+
+// render sets the main() body from the statements, emitting each define
+// as chosen in how (missing ones stay local).
+func (pc *parsedCell) render(how map[*define]hoist) {
+	mode := map[int]*define{}
+	for _, d := range pc.defines {
+		mode[d.stmt] = d
+	}
+	var body, plain strings.Builder
+	for i, c := range pc.stmts {
+		text := pc.src[c.start:c.end]
+		if d := mode[i]; d != nil {
+			switch how[d] {
+			case hoistFunc:
+				continue
+			case hoistVar:
+				// Same length, so the columns of what follows are kept.
+				rel := d.tok - c.start
+				text = text[:rel] + " =" + text[rel+2:]
+			}
+		}
+		stmt := lineDirective(pc.name, c.line, c.col) + text + "\n"
 		plain.WriteString(stmt)
-		if i == len(stmts)-1 {
+		if i == len(pc.stmts)-1 {
 			if expr, ok := displayExpr(text); ok {
 				body.WriteString("Display(\n")
-				body.WriteString(lineDirective(name, c.line, c.col))
+				body.WriteString(lineDirective(pc.name, c.line, c.col))
 				body.WriteString(expr)
 				body.WriteString(")\n")
 				continue
@@ -208,11 +277,57 @@ func parseCell(cellID, name, src string) (*parsedCell, error) {
 		body.WriteString(stmt)
 	}
 	pc.body, pc.plain = body.String(), plain.String()
-	pc.hasCode = len(chunks) > 0
-	if pc.userMain != "" && len(stmts) > 0 {
-		return nil, fmt.Errorf("%s: cell defines func main() and also has top-level statements", name)
+}
+
+// parseDefine returns the define in statement chunk c, if it is one.
+func parseDefine(src string, c chunk) *define {
+	text := src[c.start:c.end]
+	if !strings.Contains(text, ":=") {
+		return nil
 	}
-	return pc, nil
+	const prefix = "package p\nfunc _() {\n"
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, "", prefix+text+"\n}", parser.SkipObjectResolution)
+	if err != nil {
+		return nil
+	}
+	body := f.Decls[0].(*ast.FuncDecl).Body.List
+	if len(body) != 1 {
+		return nil
+	}
+	as, ok := body[0].(*ast.AssignStmt)
+	if !ok || as.Tok != token.DEFINE {
+		return nil
+	}
+	off := func(p token.Pos) int { return c.start + fset.Position(p).Offset - len(prefix) }
+	d := &define{tok: off(as.TokPos)}
+	for _, e := range as.Lhs {
+		id, ok := e.(*ast.Ident)
+		if !ok {
+			return nil
+		}
+		if id.Name == "_" {
+			continue
+		}
+		line, col := cellPos(src, off(id.Pos()))
+		d.idents = append(d.idents, defIdent{name: id.Name, line: line, col: col})
+	}
+	if len(d.idents) == 0 {
+		return nil
+	}
+	if lit, ok := as.Rhs[0].(*ast.FuncLit); ok && len(as.Lhs) == 1 && len(as.Rhs) == 1 {
+		start := off(lit.Pos())
+		line, col := cellPos(src, start)
+		d.fn = &span{start: start, end: off(lit.End()), line: line, col: col}
+	}
+	return d
+}
+
+// cellPos converts a byte offset in src to a 1-based line and column.
+func cellPos(src string, off int) (line, col int) {
+	before := src[:off]
+	line = strings.Count(before, "\n") + 1
+	return line, off - strings.LastIndexByte(before, '\n')
 }
 
 // uninteresting are function/method names whose results (byte counts,
