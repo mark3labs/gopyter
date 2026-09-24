@@ -52,6 +52,16 @@ cells are compiled with it. For completion and symbol info, install
 `go install golang.org/x/tools/gopls@latest` (without it, gopyter falls back to
 basic completion).
 
+### Agent skill
+
+To teach a coding agent (Claude Code, Codex, Cursor, …) to use gopyter and
+write notebooks, install the [skill](skills/gopyter/SKILL.md) from
+[skills.sh](https://skills.sh/mark3labs/gopyter):
+
+```sh
+npx skills add mark3labs/gopyter
+```
+
 ## Quickstart
 
 ```sh

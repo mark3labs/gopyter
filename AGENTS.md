@@ -28,6 +28,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
 | `internal/lsp`      | minimal JSON-RPC/LSP client (stdio)                                       |
 | `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup |
+| `skills/gopyter`    | agent skill (`SKILL.md`, installable with `npx skills add mark3labs/gopyter`); keep it in sync with user-visible behavior |
 | `scripts`           | tests for `install.sh` (run against a fake release; checked against `.goreleaser.yaml`) |
 
 ### Credit to GoNB
