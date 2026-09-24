@@ -44,8 +44,8 @@ func (m *Model) applyTheme(name string) {
 	if m.themes.syntax != "" {
 		codeTheme = m.themes.syntax
 	}
-	m.mdStyle = markdownStyle(p, m.themes.dark, codeTheme)
-	m.md, m.infoMD = nil, nil
+	m.md = newMarkdown(codeTheme, colFaint)
+	m.mdPanel = newMarkdown(codeTheme, colInk)
 	m.info.lines = nil // rendered with the old style
 
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colWarning)

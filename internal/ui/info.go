@@ -8,9 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/complete"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
@@ -156,61 +154,15 @@ func (m *Model) scrollInfo(delta int) {
 	m.info.top = clamp(m.info.top+delta, 0, max(len(m.info.lines)-m.info.rows, 0))
 }
 
-// infoRenderer returns a glamour renderer for the popup, separate from the
-// cells' renderer so the two widths don't evict each other. It is reset by
-// applyTheme.
-func (m *Model) infoRenderer(width int) *glamour.TermRenderer {
-	if m.infoMD == nil || m.infoMDWidth != width {
-		st := m.mdStyle
-		// The popup has its own frame and padding.
-		zero := uint(0)
-		st.Document.Margin = &zero
-		st.Document.BlockPrefix, st.Document.BlockSuffix = "", ""
-		st.CodeBlock.Margin = &zero
-		r, err := glamour.NewTermRenderer(glamour.WithStyles(st), glamour.WithWordWrap(width))
-		if err != nil {
-			return nil
-		}
-		m.infoMD, m.infoMDWidth = r, width
-	}
-	return m.infoMD
-}
-
 // infoLines renders the documentation at width, caching the result.
 func (m *Model) infoLines(width int) []string {
 	if m.info.lines != nil && m.info.width == width {
 		return m.info.lines
 	}
-	var lines []string
-	if r := m.infoRenderer(width); r != nil {
-		// Glamour drops tabs, which indent struct fields in signatures.
-		if out, err := r.Render(strings.ReplaceAll(m.info.md, "\t", "    ")); err == nil {
-			lines = strings.Split(out, "\n")
-		}
-	}
-	if lines == nil {
-		lines = strings.Split(ansi.Wrap(m.info.md, width, ""), "\n")
-	}
-	// Glamour pads lines to the wrap width (inside its styling) and adds
-	// blank edges; trim both so the popup fits the content.
-	for i, l := range lines {
-		lines[i] = ansi.Truncate(l, lipgloss.Width(strings.TrimRight(ansi.Strip(l), " ")), "")
-	}
-	blank := func(l string) bool { return ansi.Strip(l) == "" }
-	for len(lines) > 0 && blank(lines[0]) {
-		lines = lines[1:]
-	}
-	for len(lines) > 0 && blank(lines[len(lines)-1]) {
-		lines = lines[:len(lines)-1]
-	}
-	// Collapse runs of blank lines.
-	out := lines[:0]
-	for i, l := range lines {
-		if blank(l) && i > 0 && blank(lines[i-1]) {
-			continue
-		}
-		out = append(out, l)
-	}
+	// The renderer trims blank edges and collapses runs of blank lines.
+	// Doc comments are hard-wrapped for a wider page than the popup, so
+	// their paragraphs are reflowed rather than broken where the source is.
+	out := m.md.Reflowing().Render(m.info.md, width, nil)
 	m.info.lines, m.info.width = out, width
 	m.info.top = clamp(m.info.top, 0, max(len(out)-1, 0))
 	return out

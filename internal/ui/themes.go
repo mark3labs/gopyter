@@ -2,15 +2,15 @@ package ui
 
 import (
 	"fmt"
+	"image/color"
 	"slices"
 	"strconv"
 	"strings"
 	"sync"
 
-	"charm.land/glamour/v2/ansi"
-	gstyles "charm.land/glamour/v2/styles"
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
+	"github.com/mark3labs/gopyter/internal/markdown"
 )
 
 // DefaultTheme is the theme used when none is configured.
@@ -41,7 +41,7 @@ func defaultTheme() themeDef {
 			selection: "#1F4E6B", raised: "#52525B",
 			text: "#E4E4E7", dim: "#A1A1AA", muted: "#71717A",
 			subtle: "#3F3F46", faint: "#27272A", ink: "#101014",
-			syntax: "catppuccin-mocha", markdown: "dark",
+			syntax: "catppuccin-mocha",
 		},
 		light: palette{
 			primary: "#007D9C", info: "#0E7490", accent: "#7C3AED",
@@ -50,7 +50,7 @@ func defaultTheme() themeDef {
 			selection: "#BAE6FD", raised: "#A1A1AA",
 			text: "#18181B", dim: "#52525B", muted: "#71717A",
 			subtle: "#C4C4CC", faint: "#E4E4E7", ink: "#FAFAFA",
-			syntax: "catppuccin-latte", markdown: "light",
+			syntax: "catppuccin-latte",
 		},
 	}
 }
@@ -170,7 +170,8 @@ func ValidTheme(name string) bool {
 }
 
 // syntaxStyle returns the chroma style for p, registering a derived style
-// (so glamour can find it by name too) when the palette doesn't name one.
+// (so the markdown renderer can find it by name too) when the palette
+// doesn't name one.
 func syntaxStyle(themeName string, p palette, dark bool) *chroma.Style {
 	if p.syntax != "" {
 		if st := styles.Get(p.syntax); st != nil {
@@ -203,34 +204,15 @@ func syntaxStyle(themeName string, p palette, dark bool) *chroma.Style {
 	return styles.Register(st)
 }
 
-// markdownStyle returns the glamour style for p. codeTheme is the chroma
-// style name used for fenced code blocks.
-func markdownStyle(p palette, dark bool, codeTheme string) ansi.StyleConfig {
-	switch p.markdown {
-	case "dark":
-		return gstyles.DarkStyleConfig
-	case "light":
-		return gstyles.LightStyleConfig
-	}
-	cfg := gstyles.LightStyleConfig
-	if dark {
-		cfg = gstyles.DarkStyleConfig
-	}
-	s := func(v string) *string { return &v }
-	cfg.Document.Color = s(p.text)
-	cfg.Heading.Color = s(p.primary)
-	cfg.H1.Color, cfg.H1.BackgroundColor = s(p.ink), s(p.primary)
-	cfg.H6.Color = s(p.muted)
-	cfg.HorizontalRule.Color = s(p.subtle)
-	cfg.Link.Color = s(p.info)
-	cfg.LinkText.Color = s(p.primary)
-	cfg.Image.Color = s(p.accent)
-	cfg.ImageText.Color = s(p.muted)
-	cfg.Code.Color, cfg.Code.BackgroundColor = s(p.orange), s(p.faint)
-	cfg.CodeBlock.Color = s(p.muted)
-	cfg.CodeBlock.Chroma = nil
-	cfg.CodeBlock.Theme = codeTheme
-	return cfg
+// newMarkdown returns a markdown renderer in the active palette. Fenced
+// code is highlighted with the named chroma style on codeBg.
+func newMarkdown(codeTheme string, codeBg color.Color) *markdown.Renderer {
+	return markdown.New(markdown.Colors{
+		Heading: colPrimary, Info: colInfo, Accent: colAccent,
+		Warning: colWarning, Success: colSuccess, Error: colError,
+		Code: colOrange, Text: colText, Muted: colMuted, Subtle: colSubtle,
+		CodeBg: codeBg,
+	}, styles.Get(codeTheme))
 }
 
 // blendHex linearly interpolates between two "#RRGGBB" colors by t (0–1).

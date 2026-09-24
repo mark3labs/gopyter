@@ -209,11 +209,11 @@ func TestInfoThemeChangeRerenders(t *testing.T) {
 	m := newInfoModel(t, fakeDocumenter{md: "doc"}, false, "x")
 	runInfoCmds(m, m.handleKey(altK))
 	_ = screenText(m)
-	if m.info.lines == nil || m.infoMD == nil {
+	if m.info.lines == nil {
 		t.Fatal("expected cached render")
 	}
 	m.applyTheme(m.themes.name)
-	if m.info.lines != nil || m.infoMD != nil {
+	if m.info.lines != nil {
 		t.Fatal("theme change must drop the cached render")
 	}
 }

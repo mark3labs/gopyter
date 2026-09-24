@@ -16,10 +16,9 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
-	"charm.land/glamour/v2/ansi"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
+	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
@@ -143,12 +142,9 @@ type Model struct {
 	themes   themeState
 	// htmlStyles draw HTML outputs; derived from the theme.
 	htmlStyles htmlview.Styles
-	md         *glamour.TermRenderer
-	mdStyle    ansi.StyleConfig
-	mdWidth    int
-	// infoMD renders the symbol info popup at infoMDWidth.
-	infoMD      *glamour.TermRenderer
-	infoMDWidth int
+	// md renders markdown outputs and the info popup; mdPanel renders
+	// markdown cells, which sit on a panel of their own background.
+	md, mdPanel *markdown.Renderer
 
 	status     string
 	statusKind statusKind

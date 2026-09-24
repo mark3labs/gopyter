@@ -7,9 +7,10 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 - Single Go module `github.com/mark3labs/gopyter` (Go 1.27). The CLI entry
   point is `main.go`; everything else lives under `internal/`.
-- The UI is built on the Charm **v2** stack: Bubble Tea, Bubbles, Lip Gloss,
-  Glamour and Fang, plus Ultraviolet and chroma. The CLI uses cobra wrapped by
-  fang.
+- The UI is built on the Charm **v2** stack: Bubble Tea, Bubbles, Lip Gloss
+  and Fang, plus Ultraviolet and chroma. Markdown is rendered with
+  [herald-md](https://github.com/indaco/herald-md). The CLI uses cobra
+  wrapped by fang.
 - Cells are executed by generating a Go program and running `go build`
   (modeled on [GoNB](https://github.com/janpfeifer/gonb)). Code completion
   talks to `gopls` over LSP.
@@ -22,6 +23,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
+| `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
 | `internal/termimg`  | draws images as half-block text for image outputs (TUI and `run`)        |
 | `internal/htmlview` | draws HTML outputs as text with widgets; applies the program's DOM/widget ops (`Session`) |
 | `internal/kernel/runtime` | packages cell programs import: `nb` (gopyter's API) and the GoNB shim (`gonbui`, `widgets`, `comms`, `dom`, `protocol`, adapted from GoNB under its MIT license); stdlib only |
@@ -73,8 +75,8 @@ concatenation in WriteString") count as issues to fix too.
 ## Code style and conventions
 
 - **Charm v2 import paths** are vanity domains. Use `charm.land/bubbletea/v2`,
-  `charm.land/bubbles/v2/...`, `charm.land/lipgloss/v2`,
-  `charm.land/glamour/v2` and `charm.land/fang/v2`. Never use the old
+  `charm.land/bubbles/v2/...`, `charm.land/lipgloss/v2` and
+  `charm.land/fang/v2`. Never use the old
   `github.com/charmbracelet/{bubbletea,lipgloss,bubbles}` v1 modules.
   Ultraviolet is `github.com/charmbracelet/ultraviolet`, imported as `uv`.
 - **Bubble Tea v2 API:** `View()` returns a `tea.View`. Alt-screen, mouse
@@ -175,9 +177,20 @@ concatenation in WriteString") count as issues to fix too.
   one undo step. Visual mode uses the editor selection with an inclusive or
   linewise `selMode`; `vimSync` converts mouse selections.
 - Themes (`themepicker.go`): `applyTheme` swaps the global palette and
-  rebuilds everything derived from it (styles, highlighter, glamour style,
-  help/input styles, cached cell renders). Anything new that caches styled
-  output must be invalidated there too.
+  rebuilds everything derived from it (styles, highlighter, markdown
+  renderers, help/input styles, cached cell renders). Anything new that
+  caches styled output must be invalidated there too.
+- Markdown (`internal/markdown`): herald-md renders; the package then
+  wraps the result on cells (`uv.Line`), keeping list indents and quote
+  bars, and fills unstyled cells with the text color (and a background,
+  for panels). Source line breaks are kept, as laid out in the editor;
+  `Reflowing()` joins them instead (the info popup, for doc comments).
+  Build renderers with `markdown.New`, never `herald.New`: its default
+  theme queries the terminal, racing Bubble Tea for stdin. Markdown cells
+  render as a tinted panel (`colFaint`) with an accent bar in the cell's
+  border color (`renderMarkdownPanel`), so prose stands apart from
+  outputs; markdown outputs have no panel. Cells keep `cellMarginR`
+  columns clear of the scrollbar.
 - External edits (`watch.go`): a 1s tick polls the file (stat, then
   SHA-256 on change) off the UI goroutine. `save()` re-snapshots it and bumps
   `watch.gen` so our own writes and stale polls are ignored. Reloads wait

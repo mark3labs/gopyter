@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
+	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/termimg"
 )
@@ -47,16 +48,16 @@ func paint(st lipgloss.Style, s string) string {
 	return strings.Join(lines, "\n")
 }
 
+// md renders markdown in gopyter's default dark colors.
+var md = markdown.New(markdown.Colors{
+	Heading: lipgloss.Color("#00ADD8"), Info: lipgloss.Color("#5DC9E2"), Accent: lipgloss.Color("#8B5CF6"),
+	Warning: lipgloss.Color("#FDDD00"), Success: lipgloss.Color("#4ADE80"), Error: lipgloss.Color("#F87171"),
+	Code: lipgloss.Color("#FB923C"), Text: lipgloss.Color("#E4E4E7"), Muted: lipgloss.Color("#71717A"),
+	Subtle: lipgloss.Color("#3F3F46"), CodeBg: lipgloss.Color("#27272A"),
+}, styles.Get("catppuccin-mocha"))
+
 func renderMarkdown(s string) string {
-	r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(100))
-	if err != nil {
-		return s
-	}
-	out, err := r.Render(s)
-	if err != nil {
-		return s
-	}
-	return strings.Trim(out, "\n")
+	return strings.Join(md.Render(s, 100, nil), "\n")
 }
 
 // renderImage draws a base64 image, or describes it when draw is false.

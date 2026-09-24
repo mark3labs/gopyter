@@ -44,10 +44,6 @@ type palette struct {
 	// is derived from the keyword/str/number/comment/name colors.
 	syntax                              string
 	keyword, str, number, comment, name string
-
-	// markdown names a glamour standard style; when empty one is derived
-	// from the palette.
-	markdown string
 }
 
 // setPalette makes p the active palette.

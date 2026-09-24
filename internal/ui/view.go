@@ -8,7 +8,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -21,6 +20,9 @@ const (
 	headerHeight = 2
 	footerHeight = 1
 	gutterWidth  = 9 // selection bar + execution label
+	// cellMarginR keeps cells off the scrollbar, mirroring the space
+	// the gutter leaves on the left.
+	cellMarginR = 2
 )
 
 func (m *Model) viewHeight() int { return max(m.height-headerHeight-footerHeight, 1) }
@@ -289,7 +291,7 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 	var all []string
 	m.layout = m.layout[:0]
 	for i := range m.cells {
-		r := m.renderCell(i, w)
+		r := m.renderCell(i, w-cellMarginR)
 		m.layout = append(m.layout, cellLayout{top: len(all), height: len(r.lines), render: r})
 		all = append(all, r.lines...)
 		if !r.ownSpacer {
@@ -398,35 +400,37 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 	return strings.Join(out, "\n"), cursor
 }
 
-func (m *Model) markdownRenderer(width int) *glamour.TermRenderer {
-	if m.md == nil || m.mdWidth != width {
-		r, err := glamour.NewTermRenderer(glamour.WithStyles(m.mdStyle), glamour.WithWordWrap(width))
-		if err != nil {
-			return nil
-		}
-		m.md, m.mdWidth = r, width
-	}
-	return m.md
-}
+// mdPadX is the horizontal padding inside a markdown cell's panel.
+const mdPadX = 2
 
-func (m *Model) renderMarkdown(src string, width int) []string {
-	r := m.markdownRenderer(width)
-	if r == nil {
-		return strings.Split(src, "\n")
+// renderMarkdownPanel renders a markdown cell's source as a panel boxW
+// wide: a tinted background with a blank row of padding above and below,
+// so prose stands apart from the plain output of code cells. The first
+// column of every line is left out; it holds the accent bar, whose color
+// follows the cell's state, and which spans the panel's full height.
+func (m *Model) renderMarkdownPanel(src string, boxW int) string {
+	bg := lipgloss.NewStyle().Background(colFaint)
+	mdW := max(boxW-1-2*mdPadX, 8)
+	var body []string
+	if strings.TrimSpace(src) == "" {
+		body = []string{bg.Foreground(colMuted).Italic(true).Width(mdW).
+			Render(ansi.Truncate("empty markdown cell · press enter to edit", mdW, "…"))}
+	} else {
+		body = m.mdPanel.Render(src, mdW, colFaint)
 	}
-	out, err := r.Render(src)
-	if err != nil {
-		return strings.Split(src, "\n")
+	pad := bg.Render(strings.Repeat(" ", mdPadX))
+	blankRow := bg.Render(strings.Repeat(" ", boxW-1))
+	var b strings.Builder
+	b.WriteString(blankRow)
+	for _, l := range body {
+		b.WriteByte('\n')
+		b.WriteString(pad)
+		b.WriteString(l)
+		b.WriteString(pad)
 	}
-	lines := strings.Split(out, "\n")
-	// Trim blank leading/trailing lines added by glamour.
-	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[0])) == "" {
-		lines = lines[1:]
-	}
-	for len(lines) > 0 && strings.TrimSpace(ansi.Strip(lines[len(lines)-1])) == "" {
-		lines = lines[:len(lines)-1]
-	}
-	return lines
+	b.WriteByte('\n')
+	b.WriteString(blankRow)
+	return b.String()
 }
 
 func (m *Model) renderCell(i, width int) cellRender {
@@ -461,17 +465,14 @@ func (m *Model) renderCell(i, width int) cellRender {
 	// Rendered markdown (not editing).
 	if c.kind == notebook.Markdown && !editing {
 		src := c.ed.Value()
-		mdW := boxW - 2
-		if c.mdOut == "" || c.mdSrc != src || c.mdWidth != mdW {
-			c.mdSrc, c.mdWidth = src, mdW
-			if strings.TrimSpace(src) == "" {
-				c.mdOut = t.muted.Italic(true).Render("  empty markdown cell · press enter to edit")
-			} else {
-				c.mdOut = strings.Join(m.renderMarkdown(src, mdW), "\n")
-			}
+		if c.mdOut == "" || c.mdSrc != src || c.mdWidth != boxW {
+			c.mdSrc, c.mdWidth = src, boxW
+			c.mdOut = m.renderMarkdownPanel(src, boxW)
 		}
+		// The accent bar mirrors a code cell's border color.
+		accent := lipgloss.NewStyle().Background(colFaint).Foreground(borderColor).Render("▌")
 		for l := range strings.SplitSeq(c.mdOut, "\n") {
-			r.lines = append(r.lines, bar+blank+l)
+			r.lines = append(r.lines, bar+blank+accent+l)
 		}
 		// The spacer line below a rendered markdown cell hosts its action
 		// buttons when selected or hovered, so the layout never shifts.
@@ -840,7 +841,7 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 				out = append(out, t.result.Render(l))
 			}
 		case notebook.MarkdownOut:
-			out = append(out, m.renderMarkdown(o.Text, width)...)
+			out = append(out, m.md.Render(o.Text, width, nil)...)
 		case notebook.ImageOut:
 			img, err := termimg.Decode(o.Text)
 			if err != nil {
