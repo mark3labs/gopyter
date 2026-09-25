@@ -130,9 +130,10 @@ for {
 	if ws := htmlview.Widgets(outs); len(ws) != 2 || ws[0].Kind != htmlview.Slider || ws[1].Label != "go" {
 		t.Fatalf("widgets %+v in %+v", ws, outs)
 	}
-	// Without a UI (no events) the widgets are done at once.
+	// Without a UI (no events) the widgets are done at once. Their HTML is
+	// shown where they were created, before "ready".
 	out, err = run(t, k, "2", src)
-	if err != nil || !strings.HasSuffix(out, "ready\ndone 50\n") || strings.Contains(out, "not kept") {
+	if err != nil || !strings.HasPrefix(out, "<input") || !strings.HasSuffix(out, "</button>ready\ndone 50\n") || strings.Contains(out, "not kept") {
 		t.Fatalf("no UI: %q %v", out, err)
 	}
 }

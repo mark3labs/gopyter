@@ -130,6 +130,11 @@ concatenation in WriteString") count as issues to fix too.
   "value"}` and `{"done":true}`; its end means done too. Windows falls back
   to stdout. Events with an `ID` replace the output with that ID
   (`Cell.setOutput`); the ID isn't saved to the notebook.
+- Each fd 3 line is `<seq>\t<json>`, and `wire` writes a sync marker with
+  the same seq to stdout first. `syncPump` (`outsync.go`) strips the
+  markers and `outSync` holds each stream at them, so stdout and rich
+  output are emitted in the program's order. Keep the marker format in
+  sync between `outsync.go` and `wire`.
 - `htmlview.Session` applies `Op`s to a cell's outputs (HTML outputs are
   kept as serialized HTML and re-parsed per change) and produces replies.
   The UI and `runner` both use it; the runner sends `done` at once.

@@ -21,8 +21,10 @@ func Connected() bool { return connected }
 var (
 	connected = os.Getenv("GOPYTER_RICH") == "1"
 
-	outMu sync.Mutex
-	out   *os.File
+	outMu  sync.Mutex
+	out    *os.File
+	stdout = os.Stdout // file descriptor 1, even if a cell reassigns os.Stdout
+	seq    uint64
 )
 
 func init() {
@@ -31,7 +33,20 @@ func init() {
 	}
 }
 
-// send writes one message.
+// Messages and stdout travel through separate pipes, so the kernel can't
+// tell on its own whether fmt.Println("a") came before or after a Display.
+// Each message is therefore preceded by a sync marker on stdout carrying
+// its sequence number; the kernel strips the marker and emits the message
+// exactly there. The marker is an APC escape sequence, so it stays
+// invisible should it ever reach a terminal, and short enough (< PIPE_BUF)
+// to be written atomically. Keep in sync with the kernel's syncPrefix.
+const (
+	syncPrefix = "\x1b_gopyter-sync:"
+	syncSuffix = "\x1b\\"
+)
+
+// send writes one message, as "<seq>\t<json>\n". seq is 0 when no marker
+// could be written, so the kernel doesn't wait for one.
 func send(v any) bool {
 	if !connected {
 		return false
@@ -42,7 +57,12 @@ func send(v any) bool {
 	}
 	outMu.Lock()
 	defer outMu.Unlock()
-	_, err = out.Write(append(b, '\n'))
+	seq++
+	n := seq
+	if _, err := fmt.Fprintf(stdout, "%s%d%s", syncPrefix, n, syncSuffix); err != nil {
+		n = 0
+	}
+	_, err = fmt.Fprintf(out, "%d\t%s\n", n, b)
 	return err == nil
 }
 

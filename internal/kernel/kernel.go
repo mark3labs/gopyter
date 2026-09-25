@@ -856,36 +856,28 @@ func (k *Kernel) run(ctx context.Context, bin string, args []string, in Input, e
 
 	var wg sync.WaitGroup
 	wg.Add(3)
-	go func() { defer wg.Done(); pump(stdout, Stdout, emit) }()
+	osync := newOutSync()
+	go func() { defer wg.Done(); syncPump(stdout, osync, emit) }()
 	go func() { defer wg.Done(); pump(stderr, Stderr, emit) }()
 	go func() {
 		defer wg.Done()
 		defer func() { _ = dr.Close() }()
+		defer osync.closeRich()
 		sc := bufio.NewScanner(dr)
 		sc.Buffer(make([]byte, 64*1024), 64*1024*1024)
 		for sc.Scan() {
-			var m struct{ Mime, Data, ID, Op string }
-			if json.Unmarshal(sc.Bytes(), &m) != nil {
-				continue
-			}
-			if m.Op != "" {
-				emit(Event{Kind: Op, Text: sc.Text()})
-				continue
-			}
-			kind := Result
-			switch m.Mime {
-			case "text/markdown":
-				kind = Markdown
-			case "image/png":
-				kind = Image
-			case "text/html":
-				kind = HTML
-			}
-			emit(Event{Kind: kind, Text: m.Data, ID: m.ID})
+			// "<seq>\t<json>": see outsync.go.
+			seqText, msg, _ := bytes.Cut(sc.Bytes(), []byte{'\t'})
+			seq, _ := strconv.ParseUint(string(seqText), 10, 64) // 0: nothing to wait for
+			osync.beforeMessage(seq)
+			emitMessage(msg, emit)
+			osync.afterMessage(seq)
 		}
 		if err := sc.Err(); err != nil {
 			emit(Event{Kind: Error, Text: "display output: " + err.Error()})
-			// Keep draining so the program never blocks on a full pipe.
+			// Keep draining so the program never blocks on a full pipe,
+			// and stop stdout from waiting for messages that won't come.
+			osync.closeRich()
 			_, _ = io.Copy(io.Discard, dr)
 		}
 	}()
@@ -898,6 +890,28 @@ func (k *Kernel) run(ctx context.Context, bin string, args []string, in Input, e
 		return fmt.Errorf("exit status %d", ee.ExitCode())
 	}
 	return err
+}
+
+// emitMessage emits a rich message (the JSON of package wire's send).
+func emitMessage(msg []byte, emit func(Event)) {
+	var m struct{ Mime, Data, ID, Op string }
+	if json.Unmarshal(msg, &m) != nil {
+		return
+	}
+	if m.Op != "" {
+		emit(Event{Kind: Op, Text: string(msg)})
+		return
+	}
+	kind := Result
+	switch m.Mime {
+	case "text/markdown":
+		kind = Markdown
+	case "image/png":
+		kind = Image
+	case "text/html":
+		kind = HTML
+	}
+	emit(Event{Kind: kind, Text: m.Data, ID: m.ID})
 }
 
 func pump(r io.Reader, kind EventKind, emit func(Event)) {
