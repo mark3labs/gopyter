@@ -7,22 +7,7 @@ kernel for Jupyter by Jan Pfeifer: it runs cells the same way, shares its
 notebook format and cell commands, and implements its `gonbui` API and widgets,
 so GoNB notebooks run in gopyter too. See [Acknowledgements](#acknowledgements).
 
-```
- ◆ gopyter   hello.ipynb ●                                        gopls  │  go1.27.1  │  ● idle
-── ▶ run ─ ▶▶ run all ─ ■ stop ─ ↻ restart ───┼─ + code ─ + markdown ───┼─ save ─ ◐ theme ─ ? help ─
-         ╭─ go ───────────────────────────────────────────────────────────────────── ✓ 137ms ─╮
-     [1] │ 1  type Point struct{ X, Y float64 }                                               │
-         │ 2                                                                                  │
-         │ 3  func (p Point) Dist() float64 { return math.Hypot(p.X, p.Y) }                   │
-         ╰────────────────────────────────────────────────────────────────────────────────────╯
-
-▌        ╭─ go ───────────────────────────────────────────────────────────────────── ✓ 144ms ─╮
-▌    [2] │ 1  p := Point{3, 4}                                                                │
-▌        │ 2  p.Dist()                                                                        │
-▌        ╰────────────────────────────────────────────────────────── ▶ ─ ⇄md ─ ↑ ─ ↓ ─ ⧉ ─ ✕ ─╯
-▌ Out[2]   5
- COMMAND   ↵ edit · ⇧↵/^r run & next · m to markdown · b insert below · dd delete · ^s save · ? help
-```
+![gopyter demo](assets/demo.gif)
 
 - **Real Go, cell by cell.** Declarations persist across cells, the last expression is displayed, and compile errors point at cell lines
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
