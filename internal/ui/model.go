@@ -440,6 +440,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Global bindings.
 	switch {
+	case msg.String() == "alt+shift+f" || msg.String() == "alt+shift+F" || msg.String() == "alt+F":
+		return m.formatCell(m.sel)
 	case key.Matches(msg, k.RunAdvance) && (!m.vimActive() || msg.String() != "ctrl+r"):
 		// In vim normal mode ctrl+r is redo; shift+enter still runs.
 		return m.runSelected(true, false)

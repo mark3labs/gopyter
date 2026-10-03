@@ -36,8 +36,13 @@ go version            # required: cells are built with the Go toolchain on PATH
 | `gopyter run file.ipynb` | run every code cell in order and print the outputs |
 | `gopyter run file.ipynb --save` | also write outputs and execution counts into the file |
 | `gopyter run file.ipynb --fail-fast` | stop at the first failing cell |
+| `gopyter format file.ipynb` | format Go code cells in place without execution; preserve commands, metadata and outputs; leave the file unchanged on syntax errors |
 | `--workdir DIR` | keep the kernel workspace (a Go module) in `DIR` instead of a temporary directory |
 | `gopyter themes`, `gopyter model` | list themes / show or set the optional AI model (TUI features) |
+
+In the TUI, `alt+shift+f` or the bottom-right `fmt` cell button formats the
+selected code cell as one undo step. Markdown, raw cells and non-Go cell-magics
+are left unchanged.
 
 `gopyter run` exits non-zero if any cell fails. Compile errors are reported
 as `In[n]:line:col: message`, where `n` is the position of the code cell

@@ -781,6 +781,9 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
 		{action{kind: actDeleteCell, cell: i}, "✕", "delete cell · dd", true},
 	}
+	if c.kind == notebook.Code {
+		btns = append(btns, btn{action{kind: actFormatCell, cell: i}, "fmt", "format Go code · alt+shift+f", false})
+	}
 	switch {
 	case !markdown && m.fixable(c):
 		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.assistant.Model() + ") · f", false}}, btns...)

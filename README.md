@@ -295,6 +295,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `dd` / `z`                   | delete / undo delete                     |
 | `x` `c` `v`, `K` / `J`       | cut / copy / paste, move cell up / down  |
 | `m` / `y` (`ctrl+t` editing) | convert to markdown / code               |
+| `alt+shift+f`                | format the selected Go cell with gofmt    |
 | `o` / `O`                    | fold long output / clear output          |
 | `D`                          | clear every cell's output                |
 | `ctrl+s` / `q`               | save / quit                              |
@@ -303,6 +304,14 @@ mode** (green) edits text. Press `?` for the full list.
 | `M`                          | pick the AI model, or turn AI on / off   |
 | `e`                          | ask AI to write or change a cell (when AI is on) |
 | `f`                          | fix a failing cell with AI (when AI is on) |
+
+Format a code cell with `alt+shift+f` (in command or edit mode), or the `fmt`
+button at the bottom right of the selected/hovered code cell. Formatting uses
+Go's gofmt formatter, preserves notebook commands and source order, and is one
+undo step; it does not execute code. Non-Go cell-magics such as `%%bash` and
+`%%writefile` are left untouched. `gopyter format file.ipynb` formats all code
+cells in place, preserving metadata and outputs; if any cell has invalid Go
+syntax, the file is left unchanged. Markdown and raw cells are never formatted.
 
 In edit mode: `tab` or `ctrl+space` completes, `shift`+arrows select, `ctrl+c`/`ctrl+x`
 copy/cut, `ctrl+z`/`ctrl+y` undo/redo, and `↑`/`↓` flow between cells.
@@ -426,6 +435,7 @@ support, and without the kit dependency, see Development.
 gopyter run notes.ipynb            # run every code cell, print the outputs
 gopyter run notes.ipynb --save     # …and write the outputs into the notebook
 gopyter run notes.ipynb --fail-fast
+gopyter format notes.ipynb         # format code cells in place, without running
 ```
 
 It exits non-zero if any cell fails, so it works as a CI check for notebooks.

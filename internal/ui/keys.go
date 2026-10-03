@@ -204,6 +204,7 @@ func (k keyMap) baseHelp() []helpSection {
 		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
+			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "format Go code")),
 			key.NewBinding(key.WithKeys("shift+left"), key.WithHelp("⇧+move", "select")),
 			key.NewBinding(key.WithKeys("alt+a"), key.WithHelp("alt+a", "select all")),
 			key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^c", "copy selection")),

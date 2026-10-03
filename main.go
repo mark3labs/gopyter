@@ -127,7 +127,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir), themesCmd(), modelCmd())
+	cmd.AddCommand(runCmd(&workdir), formatCmd(), themesCmd(), modelCmd())
 	return cmd
 }
 

@@ -52,6 +52,7 @@ const (
 	actWidgetClick // click a button widget (action.id is its address)
 	actWidgetSet   // set a slider or select (action.id) to action.n
 	actWidgetMenu  // list a select's options (action.id)
+	actFormatCell  // format Go source without running it
 	actAskCell     // ask the AI to change the cell
 	actAddCode     // insert a code cell at index action.cell
 	actAddMarkdown // insert a markdown cell at index action.cell
@@ -674,6 +675,8 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.commandKey(a.cell, "O")
 	case actFixCell:
 		return m.commandKey(a.cell, "f")
+	case actFormatCell:
+		return m.formatCell(a.cell)
 	case actAskCell:
 		return m.commandKey(a.cell, "e")
 	case actAskSend:
