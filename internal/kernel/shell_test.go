@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func newKernel(t *testing.T) *Kernel {
@@ -85,6 +86,26 @@ func TestShellTerminal(t *testing.T) {
 	out, _ = streams(t, k, "7", `!printf '10%%\r90%%\n'`, "")
 	if out != "10%\r90%\n" {
 		t.Fatalf("redraw: %q", out)
+	}
+}
+
+func TestShellTerminalDrainsOutput(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no pseudo-terminal on Windows")
+	}
+	// A slow consumer leaves output buffered in the terminal when the
+	// shell exits. Waiting for the process must not discard those bytes.
+	const lines = 10000
+	cmd := exec.Command("sh", "-c", "i=0; while [ $i -lt 10000 ]; do echo buffered; i=$((i+1)); done")
+	var out strings.Builder
+	if err := runShellPTY(context.Background(), cmd, 78, func(ev Event) {
+		time.Sleep(10 * time.Millisecond)
+		out.WriteString(ev.Text)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Repeat("buffered\n", lines); out.String() != want {
+		t.Fatalf("received %d bytes, want %d", out.Len(), len(want))
 	}
 }
 

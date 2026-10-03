@@ -172,12 +172,10 @@ func runShellPTY(ctx context.Context, cmd *exec.Cmd, width int, emit func(Event)
 		pumpTerminal(master, Stdout, emit)
 	}()
 	err = cmd.Wait()
-	// Reading the terminal only ends when the last process holding it is
-	// gone (a background job the command left behind keeps it open), and
-	// a blocked read can't be interrupted: closing the master doesn't
-	// wake it, and the file takes no read deadline. So the command is
-	// waited for, like it was on pipes.
-	closeMaster()
+	// Drain the terminal before closing the master: the shell may exit
+	// while its output is still buffered, and closing here loses it.
+	// Reading ends when the last process holding the slave is gone;
+	// background jobs keep the cell waiting, just as they do on pipes.
 	<-done
 	if err != nil && ctx.Err() != nil {
 		return ErrInterrupted
