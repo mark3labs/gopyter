@@ -20,7 +20,7 @@
     # Keep the `# nix:gopyter-release-tag` marker on the url line:
     # scripts/bump-flake-release-pin.sh matches on it.
     gopyter-release = {
-      url = "github:mark3labs/gopyter/v0.9.1"; # nix:gopyter-release-tag
+      url = "github:mark3labs/gopyter/v0.10.0"; # nix:gopyter-release-tag
       flake = false;
     };
   };
@@ -42,7 +42,7 @@
       # It cannot be derived from the input: a `flake = false` input arrives in
       # the outputs as a bare store path, so the tag in the url is not visible
       # here.
-      version = "0.9.1"; # nix:gopyter-release-version
+      version = "0.10.0"; # nix:gopyter-release-version
 
       # The platforms goreleaser builds, except x86_64-darwin: nixpkgs 26.11
       # dropped Intel Mac support, so a flake on a current nixpkgs cannot build
