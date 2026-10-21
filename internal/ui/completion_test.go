@@ -2,9 +2,14 @@ package ui
 
 import (
 	"context"
+	"image/color"
+	"slices"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/complete"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
@@ -125,6 +130,73 @@ func TestCompletionFlow(t *testing.T) {
 	typeText(m, `x := "Pr`)
 	if m.comp.open {
 		t.Fatal("no completion inside strings")
+	}
+}
+
+func TestCompletionIconsUsePalette(t *testing.T) {
+	themeModel(t, Options{}) // restore the default palette after the test
+	for _, name := range ThemeNames() {
+		def, ok := lookupTheme(name)
+		if !ok {
+			t.Fatalf("missing theme %q", name)
+		}
+		for _, dark := range []bool{false, true} {
+			setPalette(def.palette(dark))
+			paletteColors := []color.Color{
+				colPrimary, colInfo, colAccent, colSuccess, colWarning,
+				colError, colOrange, colText, colDim, colMuted,
+			}
+			for k := complete.KindOther; k <= complete.KindKeyword; k++ {
+				if got := kindColor(k); !slices.Contains(paletteColors, got) {
+					t.Errorf("%s dark=%v: kind %d color %v is not in the palette", name, dark, k, got)
+				}
+			}
+			if got := kindColor(complete.Kind(-1)); got != colDim {
+				t.Errorf("%s dark=%v: unknown kind color = %v, want %v", name, dark, got, colDim)
+			}
+		}
+	}
+}
+
+func TestCompletionIconsFollowTheme(t *testing.T) {
+	themeModel(t, Options{})
+	setPalette(defaultTheme().palette(true))
+	dark := kindColor(complete.KindVar)
+	setPalette(defaultTheme().palette(false))
+	if light := kindColor(complete.KindVar); light == dark {
+		t.Fatalf("variable icon color did not change between variants: %v", light)
+	}
+}
+
+func TestCompletionIconsRenderAfterThemeChange(t *testing.T) {
+	var items []complete.Item
+	for k := complete.KindOther; k <= complete.KindKeyword; k++ {
+		items = append(items, complete.Item{Label: "candidate", Insert: "candidate", Kind: k})
+	}
+	m := themeModel(t, Options{Completer: fakeCompleter{items}})
+	m.cur().ed.SetValue("")
+	m.handleKey(tea.KeyPressMsg{Code: tea.KeyEnter})
+	typeText(m, "ca")
+	if !m.comp.open || len(m.comp.items) != len(items) {
+		t.Fatalf("expected all completion kinds, got open=%v items=%v", m.comp.open, m.comp.items)
+	}
+	m.renderCompletion(10, 5)
+	m.themes.dark = false
+	m.applyTheme("dracula")
+
+	// Scroll through the popup because there are more kinds than visible rows.
+	for i, it := range m.comp.items {
+		m.comp.idx = i
+		popup, _, _, _ := m.renderCompletion(10, 5)
+		glyph := kindIcons[it.Kind]
+		if !strings.Contains(ansi.Strip(popup), " "+glyph+" ") {
+			t.Errorf("kind %d glyph %q missing from popup", it.Kind, glyph)
+		}
+		want := lipgloss.NewStyle().Background(colSelection).
+			Foreground(kindColor(it.Kind)).Bold(true).Render(" " + glyph + " ")
+		if !strings.Contains(popup, want) {
+			t.Errorf("kind %d icon does not use the active palette", it.Kind)
+		}
 	}
 }
 
