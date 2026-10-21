@@ -11,6 +11,7 @@ import (
 	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/mark3labs/gopyter/internal/markdown"
+	defaultpalette "github.com/mark3labs/gopyter/internal/palette"
 )
 
 // DefaultTheme is the theme used when none is configured.
@@ -32,27 +33,18 @@ func (d themeDef) palette(dark bool) palette {
 
 // defaultTheme is gopyter's own theme, built around the Go brand colors.
 func defaultTheme() themeDef {
-	return themeDef{
-		name: DefaultTheme,
-		dark: palette{
-			primary: "#00ADD8", info: "#5DC9E2", accent: "#8B5CF6",
-			success: "#4ADE80", warning: "#FDDD00", error: "#F87171",
-			errorBar: "#CE3262", orange: "#FB923C",
-			selection: "#1F4E6B", raised: "#52525B",
-			text: "#E4E4E7", dim: "#A1A1AA", muted: "#71717A",
-			subtle: "#3F3F46", faint: "#27272A", ink: "#101014",
-			syntax: "catppuccin-mocha",
-		},
-		light: palette{
-			primary: "#007D9C", info: "#0E7490", accent: "#7C3AED",
-			success: "#16A34A", warning: "#B45309", error: "#DC2626",
-			errorBar: "#CE3262", orange: "#EA580C",
-			selection: "#BAE6FD", raised: "#A1A1AA",
-			text: "#18181B", dim: "#52525B", muted: "#71717A",
-			subtle: "#C4C4CC", faint: "#E4E4E7", ink: "#FAFAFA",
-			syntax: "catppuccin-latte",
-		},
+	fromDefault := func(p defaultpalette.Colors) palette {
+		return palette{
+			primary: p.Primary, info: p.Info, accent: p.Accent,
+			success: p.Success, warning: p.Warning, error: p.Error,
+			errorBar: p.ErrorBar, orange: p.Orange,
+			selection: p.Selection, raised: p.Raised,
+			text: p.Text, dim: p.Dim, muted: p.Muted,
+			subtle: p.Subtle, faint: p.Faint, ink: p.Ink,
+			syntax: p.Syntax,
+		}
 	}
+	return themeDef{name: DefaultTheme, dark: fromDefault(defaultpalette.Dark), light: fromDefault(defaultpalette.Light)}
 }
 
 // kitColors mirrors the preset palette format of the kit coding agent

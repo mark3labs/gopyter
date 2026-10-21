@@ -24,6 +24,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
+| `internal/palette`  | default dark and light colors shared by the UI and runner               |
 | `internal/termimg`  | draws images as half-block text for image outputs (TUI and `run`)        |
 | `internal/htmlview` | draws HTML outputs as text with widgets; applies the program's DOM/widget ops (`Session`) |
 | `internal/kernel/runtime` | packages cell programs import: `nb` (gopyter's API) and the GoNB shim (`gonbui`, `widgets`, `comms`, `dom`, `protocol`, adapted from GoNB under its MIT license); stdlib only |

@@ -3,13 +3,52 @@ package runner
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/palette"
 )
+
+func TestRunStoresInfo(t *testing.T) {
+	k, err := kernel.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := k.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	nb := &notebook.Notebook{Cells: []*notebook.Cell{
+		{ID: "a", Type: notebook.Code, Source: "%goflags"},
+		{ID: "b", Type: notebook.Code, Source: "fmt.Println(1)"},
+	}}
+	var out bytes.Buffer
+	if failed := Run(t.Context(), k, nb, &out, nil, false); failed != 0 {
+		t.Fatalf("failed:\n%s", out.String())
+	}
+	want := []notebook.Output{{Kind: notebook.Info, Text: "go build flags: (none)"}}
+	if !reflect.DeepEqual(nb.Cells[0].Outputs, want) {
+		t.Fatalf("outputs = %+v, want %+v", nb.Cells[0].Outputs, want)
+	}
+	if !strings.Contains(out.String(), "› go build flags") {
+		t.Fatalf("missing info in printed output: %s", out.String())
+	}
+	if got := nb.Cells[1].Outputs; len(got) != 1 || got[0].Kind != notebook.Stdout || got[0].Text != "1\n" {
+		t.Fatalf("second cell outputs = %+v", got)
+	}
+}
+
+func TestLabelUsesDefaultPalette(t *testing.T) {
+	if got := labelStyle.GetForeground(); got != lipgloss.Color(palette.Dark.Primary) {
+		t.Fatalf("label foreground = %v, want %s", got, palette.Dark.Primary)
+	}
+}
 
 func TestRunWidgetsAndDOM(t *testing.T) {
 	k, err := kernel.New("")
