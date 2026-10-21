@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"image"
+	"image/color"
 	"strings"
 	"time"
 	"unicode"
@@ -384,20 +385,41 @@ func (m *Model) afterEditKey(msg tea.KeyPressMsg, cellID string, version int) te
 	}
 }
 
-var kindIcons = map[complete.Kind]struct {
-	icon string
-	col  string
-}{
-	complete.KindFunc:      {"ƒ", "#60A5FA"},
-	complete.KindMethod:    {"m", "#A78BFA"},
-	complete.KindVar:       {"v", "#FDDD00"},
-	complete.KindConst:     {"c", "#FB923C"},
-	complete.KindField:     {"f", "#5DC9E2"},
-	complete.KindType:      {"T", "#4ADE80"},
-	complete.KindInterface: {"I", "#34D399"},
-	complete.KindPackage:   {"p", "#F472B6"},
-	complete.KindKeyword:   {"k", "#CE3262"},
-	complete.KindOther:     {"·", "#A1A1AA"},
+var kindIcons = map[complete.Kind]string{
+	complete.KindFunc:      "ƒ",
+	complete.KindMethod:    "m",
+	complete.KindVar:       "v",
+	complete.KindConst:     "c",
+	complete.KindField:     "f",
+	complete.KindType:      "T",
+	complete.KindInterface: "I",
+	complete.KindPackage:   "p",
+	complete.KindKeyword:   "k",
+	complete.KindOther:     "·",
+}
+
+// kindColor reads the palette at render time so every theme applies.
+func kindColor(k complete.Kind) color.Color {
+	switch k {
+	case complete.KindFunc:
+		return colPrimary
+	case complete.KindMethod:
+		return colAccent
+	case complete.KindVar:
+		return colWarning
+	case complete.KindConst:
+		return colOrange
+	case complete.KindField:
+		return colInfo
+	case complete.KindType, complete.KindInterface:
+		return colSuccess
+	case complete.KindPackage:
+		return colError
+	case complete.KindKeyword:
+		return colMuted
+	default:
+		return colDim
+	}
 }
 
 // highlightMatch emphasizes the characters of label matching typed.
@@ -459,7 +481,7 @@ func (m *Model) renderCompletion(cx, cy int) (string, int, int, []zone) {
 			if sel {
 				bg = bg.Background(colSelection)
 			}
-			icon := bg.Foreground(lipgloss.Color(ki.col)).Bold(true).Render(" " + ki.icon + " ")
+			icon := bg.Foreground(kindColor(it.Kind)).Bold(true).Render(" " + ki + " ")
 			base := bg.Foreground(colText)
 			hi := bg.Foreground(colPrimary).Bold(true)
 			label := highlightMatch(ansi.Truncate(it.Label, labelW, "…"), typed, base, hi)
