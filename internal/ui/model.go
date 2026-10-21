@@ -946,22 +946,9 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 				cmds = append(cmds, m.applyOp(c, e.Text))
 				continue
 			}
-			kind := notebook.Info
-			switch e.Kind {
-			case kernel.Stdout:
-				kind = notebook.Stdout
-			case kernel.Stderr:
-				kind = notebook.Stderr
-			case kernel.Result:
-				kind = notebook.Result
-			case kernel.Markdown:
-				kind = notebook.MarkdownOut
-			case kernel.Image:
-				kind = notebook.ImageOut
-			case kernel.Error:
-				kind = notebook.Error
-			case kernel.HTML:
-				kind = notebook.HTMLOut
+			kind, ok := e.Kind.OutputKind()
+			if !ok {
+				continue
 			}
 			if e.ID != "" {
 				c.setOutput(kind, e.Text, e.ID)

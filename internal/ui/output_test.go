@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"reflect"
 	"testing"
 
+	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
@@ -54,5 +56,28 @@ func TestClearAllOutputsFromMenu(t *testing.T) {
 	}
 	if m.hasOutputs() {
 		t.Fatal("hasOutputs: want false once every output is gone")
+	}
+}
+
+func TestHandleRunEventsOutputs(t *testing.T) {
+	c := newCell(notebook.Code, "")
+	m := &Model{cells: []*Cell{c}, running: &runState{id: 1, cellID: c.id}}
+	m.handleRunEvents(runEventsMsg{id: 1, events: []kernel.Event{
+		{Kind: kernel.Stdout, Text: "a"},
+		{Kind: kernel.Stdout, Text: "b"},
+		{Kind: kernel.Result, Text: "1", ID: "x"},
+		{Kind: kernel.Result, Text: "2", ID: "x"},
+		{Kind: kernel.Info, Text: "i"},
+	}})
+	want := []notebook.Output{
+		{Kind: notebook.Stdout, Text: "ab"},
+		{Kind: notebook.Result, Text: "2", ID: "x"},
+		{Kind: notebook.Info, Text: "i"},
+	}
+	if !reflect.DeepEqual(c.outputs, want) {
+		t.Fatalf("outputs = %+v, want %+v", c.outputs, want)
+	}
+	if c.outRev != 5 {
+		t.Fatalf("output revision = %d, want 5", c.outRev)
 	}
 }

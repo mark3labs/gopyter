@@ -127,29 +127,14 @@ func (c *Cell) setKind(kind notebook.CellType) {
 
 func (c *Cell) appendOutput(kind notebook.OutputKind, text string) {
 	c.outRev++
-	if n := len(c.outputs); n > 0 && (kind == notebook.Stdout || kind == notebook.Stderr) && c.outputs[n-1].Kind == kind {
-		c.outputs[n-1].Text += text
-		// Keep memory bounded for chatty programs.
-		if len(c.outputs[n-1].Text) > 4<<20 {
-			t := c.outputs[n-1].Text
-			c.outputs[n-1].Text = t[len(t)-(2<<20):]
-		}
-		return
-	}
-	c.outputs = append(c.outputs, notebook.Output{Kind: kind, Text: text})
+	c.outputs, _ = notebook.AddOutput(c.outputs, kind, text, "")
 }
 
 // setOutput shows an updatable output (DisplayID): it replaces the
 // output with the same id, or is appended the first time.
 func (c *Cell) setOutput(kind notebook.OutputKind, text, id string) {
 	c.outRev++
-	for i := range c.outputs {
-		if c.outputs[i].ID == id {
-			c.outputs[i].Kind, c.outputs[i].Text = kind, text
-			return
-		}
-	}
-	c.outputs = append(c.outputs, notebook.Output{Kind: kind, Text: text, ID: id})
+	c.outputs, _ = notebook.AddOutput(c.outputs, kind, text, id)
 }
 
 // cellRender is the rendered form of a cell plus layout metadata.

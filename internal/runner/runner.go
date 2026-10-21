@@ -17,17 +17,18 @@ import (
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/palette"
 	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 var (
-	labelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#00ADD8")).Bold(true)
-	codeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("#71717A"))
-	outStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7"))
-	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#F87171"))
-	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FB923C"))
-	resultStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#5DC9E2"))
-	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("#4ADE80"))
+	labelStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Primary)).Bold(true)
+	codeStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Muted))
+	outStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Text))
+	errStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Error))
+	stderrStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Orange))
+	resultStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Info))
+	okStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Success))
 )
 
 // write and writeln write styled output. Write errors (e.g. a closed pipe)
@@ -50,11 +51,11 @@ func paint(st lipgloss.Style, s string) string {
 
 // md renders markdown in gopyter's default dark colors.
 var md = markdown.New(markdown.Colors{
-	Heading: lipgloss.Color("#00ADD8"), Info: lipgloss.Color("#5DC9E2"), Accent: lipgloss.Color("#8B5CF6"),
-	Warning: lipgloss.Color("#FDDD00"), Success: lipgloss.Color("#4ADE80"), Error: lipgloss.Color("#F87171"),
-	Code: lipgloss.Color("#FB923C"), Text: lipgloss.Color("#E4E4E7"), Muted: lipgloss.Color("#71717A"),
-	Subtle: lipgloss.Color("#3F3F46"), CodeBg: lipgloss.Color("#27272A"),
-}, styles.Get("catppuccin-mocha"))
+	Heading: lipgloss.Color(palette.Dark.Primary), Info: lipgloss.Color(palette.Dark.Info), Accent: lipgloss.Color(palette.Dark.Accent),
+	Warning: lipgloss.Color(palette.Dark.Warning), Success: lipgloss.Color(palette.Dark.Success), Error: lipgloss.Color(palette.Dark.Error),
+	Code: lipgloss.Color(palette.Dark.Orange), Text: lipgloss.Color(palette.Dark.Text), Muted: lipgloss.Color(palette.Dark.Muted),
+	Subtle: lipgloss.Color(palette.Dark.Subtle), CodeBg: lipgloss.Color(palette.Dark.Faint),
+}, styles.Get(palette.Dark.Syntax))
 
 func renderMarkdown(s string) string {
 	return strings.Join(md.Render(s, 100, nil), "\n")
@@ -79,9 +80,9 @@ var htmlStyles = htmlview.Styles{
 	Code:        resultStyle,
 	Link:        resultStyle.Underline(true),
 	Muted:       codeStyle,
-	Button:      lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7")).Background(lipgloss.Color("#3F3F46")),
-	ButtonFocus: lipgloss.NewStyle().Foreground(lipgloss.Color("#E4E4E7")).Background(lipgloss.Color("#3F3F46")),
-	ButtonOff:   lipgloss.NewStyle().Foreground(lipgloss.Color("#A1A1AA")).Background(lipgloss.Color("#27272A")),
+	Button:      outStyle.Background(lipgloss.Color(palette.Dark.Subtle)),
+	ButtonFocus: outStyle.Background(lipgloss.Color(palette.Dark.Subtle)),
+	ButtonOff:   lipgloss.NewStyle().Foreground(lipgloss.Color(palette.Dark.Dim)).Background(lipgloss.Color(palette.Dark.Faint)),
 	Accent:      labelStyle,
 }
 
@@ -150,20 +151,10 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			writeln(w, codeStyle.Render("  │ "+l))
 		}
 
-		appendOut := func(kind notebook.OutputKind, text, id string) {
-			if id != "" {
-				for i := range c.Outputs {
-					if c.Outputs[i].ID == id {
-						c.Outputs[i].Kind, c.Outputs[i].Text = kind, text
-						return
-					}
-				}
-			}
-			if n := len(c.Outputs); n > 0 && c.Outputs[n-1].Kind == kind && (kind == notebook.Stdout || kind == notebook.Stderr) {
-				c.Outputs[n-1].Text += text
-				return
-			}
-			c.Outputs = append(c.Outputs, notebook.Output{Kind: kind, Text: text, ID: id})
+		appendOut := func(kind notebook.OutputKind, text, id string) int {
+			var i int
+			c.Outputs, i = notebook.AddOutput(c.Outputs, kind, text, id)
+			return i
 		}
 		// Program output that styles itself (escape codes) is passed
 		// through: write adapts its colors to w.
@@ -177,17 +168,6 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			} else {
 				write(w, paint(st, text))
 			}
-		}
-		// rich stores a rich output and prints it.
-		rich := func(kind notebook.OutputKind, text, id string) {
-			appendOut(kind, text, id)
-			i := len(c.Outputs) - 1
-			for j := range c.Outputs {
-				if id != "" && c.Outputs[j].ID == id {
-					i = j
-				}
-			}
-			bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], tty), id != "", true)
 		}
 		ev := newEvents()
 		start := time.Now()
@@ -205,24 +185,20 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 				ev.reply(r.Reply)
 				return
 			}
+			kind, ok := e.Kind.OutputKind()
+			if !ok {
+				return
+			}
+			i := appendOut(kind, e.Text, e.ID)
 			switch e.Kind {
 			case kernel.Stdout:
-				appendOut(notebook.Stdout, e.Text, "")
 				stream(outStyle, e.Text)
 			case kernel.Stderr:
-				appendOut(notebook.Stderr, e.Text, "")
 				stream(stderrStyle, e.Text)
-			case kernel.Result:
-				rich(notebook.Result, e.Text, e.ID)
-			case kernel.Markdown:
-				rich(notebook.MarkdownOut, e.Text, e.ID)
-			case kernel.Image:
-				rich(notebook.ImageOut, e.Text, e.ID)
-			case kernel.HTML:
-				rich(notebook.HTMLOut, e.Text, e.ID)
+			case kernel.Result, kernel.Markdown, kernel.Image, kernel.HTML:
+				bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], tty), e.ID != "", true)
 			case kernel.Error:
 				bl.other()
-				appendOut(notebook.Error, e.Text, "")
 				writeln(w, paint(errStyle, e.Text))
 			case kernel.Info:
 				bl.other()
