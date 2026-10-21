@@ -499,30 +499,8 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 		return err
 	}
 
-	var decls []*Decl
-	var imps, resolved []*Import
-	write := func() error {
-		var src string
-		src, resolved = k.generate(decls, imps, pc)
-		if err := os.WriteFile(mainPath, []byte(src), 0o644); err != nil {
-			return err
-		}
-		return writeVars(k.Dir, decls)
-	}
-	// prepare decides which variables are hoisted, which needs the
-	// dependencies (it is repeated after fetching modules).
-	prepare := func() error {
-		decls, imps = k.merge(cellID, pc.decls, pc.imports)
-		if len(pc.defines) > 0 {
-			how, extra := k.hoist(ctx, k.Dir, k.goCmd(ctx).Env, cellID, pc, decls, imps)
-			pc.render(how)
-			if len(extra) > 0 {
-				decls, imps = k.merge(cellID, append(slices.Clip(pc.decls), extra...), pc.imports)
-			}
-		}
-		return write()
-	}
-	if err := prepare(); err != nil {
+	prepared, write, err := k.prepare(ctx, k.Dir, mainPath, k.goCmd(ctx).Env, cellID, pc)
+	if err != nil {
 		return err
 	}
 
@@ -547,9 +525,7 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 		if err == nil {
 			break
 		}
-		if pc.body != pc.plain && strings.Contains(string(out), "used as value") {
-			// The trailing call returns no value: don't display it.
-			pc.body = pc.plain
+		if retryVoid(pc, out) {
 			if err := write(); err != nil {
 				return err
 			}
@@ -564,7 +540,9 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 					return ErrCompile
 				}
 			}
-			if err := prepare(); err != nil {
+			// Hoisting needs dependencies, so repeat it after fetching modules.
+			prepared, write, err = k.prepare(ctx, k.Dir, mainPath, k.goCmd(ctx).Env, cellID, pc)
+			if err != nil {
 				return err
 			}
 			continue
@@ -575,7 +553,7 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 
 	// Compilation succeeded: commit the declarations.
 	k.mu.Lock()
-	k.decls, k.imports, k.resolved = decls, imps, resolved
+	k.decls, k.imports, k.resolved = prepared.decls, prepared.imps, prepared.resolved
 	args := append([]string(nil), k.args...)
 	k.mu.Unlock()
 	switch {
@@ -595,6 +573,48 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 		k.afterRun(cellID, emit)
 	}
 	return err
+}
+
+// build holds a cell's merged declarations and imports, including the imports
+// resolved when its source is written. Only Execute commits these to the kernel.
+type build struct {
+	decls    []*Decl
+	imps     []*Import
+	resolved []*Import
+}
+
+// prepare merges and hoists pc's declarations in dir and writes file. The
+// returned write regenerates the program after a trailing-call retry. Neither
+// merging nor preparation commits declarations to the kernel.
+func (k *Kernel) prepare(ctx context.Context, dir, file string, env []string, cellID string, pc *parsedCell) (*build, func() error, error) {
+	b := &build{}
+	b.decls, b.imps = k.merge(cellID, pc.decls, pc.imports)
+	if len(pc.defines) > 0 {
+		how, extra := k.hoist(ctx, dir, env, cellID, pc, b.decls, b.imps)
+		pc.render(how)
+		if len(extra) > 0 {
+			b.decls, b.imps = k.merge(cellID, append(slices.Clip(pc.decls), extra...), pc.imports)
+		}
+	}
+	write := func() error {
+		var src string
+		src, b.resolved = k.generate(b.decls, b.imps, pc)
+		if err := os.WriteFile(file, []byte(src), 0o644); err != nil {
+			return err
+		}
+		return writeVars(dir, b.decls)
+	}
+	return b, write, write()
+}
+
+// retryVoid switches to the plain body when a trailing call returns no value
+// and therefore cannot be displayed. It reports whether to rewrite and retry.
+func retryVoid(pc *parsedCell, out []byte) bool {
+	if pc.body != pc.plain && strings.Contains(string(out), "used as value") {
+		pc.body = pc.plain
+		return true
+	}
+	return false
 }
 
 // merge returns the declarations and imports of the other cells, minus

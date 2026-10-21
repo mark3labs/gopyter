@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 )
 
 // CheckDirName is the sub-package of the workspace where Check builds
@@ -59,24 +58,8 @@ func (k *Kernel) Check(ctx context.Context, cellID, name, src string) (CheckResu
 	// the workspace's module alone. Later settings win, so these override.
 	env := append(k.goCmd(ctx).Env, "GOFLAGS=-mod=readonly", "GOPROXY=off")
 
-	// The same steps as Execute's prepare, in dir. merge only reads the
-	// kernel's declarations; committing them is Execute's job.
-	decls, imps := k.merge(cellID, pc.decls, pc.imports)
-	if len(pc.defines) > 0 {
-		how, extra := k.hoist(ctx, dir, env, cellID, pc, decls, imps)
-		pc.render(how)
-		if len(extra) > 0 {
-			decls, imps = k.merge(cellID, append(slices.Clip(pc.decls), extra...), pc.imports)
-		}
-	}
-	write := func() error {
-		gen, _ := k.generate(decls, imps, pc)
-		if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(gen), 0o644); err != nil {
-			return err
-		}
-		return writeVars(dir, decls)
-	}
-	if err := write(); err != nil {
+	_, write, err := k.prepare(ctx, dir, filepath.Join(dir, "main.go"), env, cellID, pc)
+	if err != nil {
 		return CheckResult{}, err
 	}
 
@@ -93,9 +76,7 @@ func (k *Kernel) Check(ctx context.Context, cellID, name, src string) (CheckResu
 		if err == nil {
 			return CheckResult{}, nil
 		}
-		if pc.body != pc.plain && strings.Contains(string(out), "used as value") {
-			// As in Execute: a trailing call without a value isn't displayed.
-			pc.body = pc.plain
+		if retryVoid(pc, out) {
 			if err := write(); err != nil {
 				return CheckResult{}, err
 			}
