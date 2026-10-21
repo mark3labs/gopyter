@@ -315,7 +315,7 @@ concatenation in WriteString") count as issues to fix too.
   - gofmt, build, vet and `go test -race` on Linux and macOS (with gopls
     installed, so the completion tests run)
   - a CGO-disabled build
-  - golangci-lint (pinned v2.13.2)
+  - golangci-lint (pinned v2.15.0)
   - a GoReleaser snapshot build of every release target
 - `.github/workflows/release.yml` runs on `v*` tags. It tests, then runs
   GoReleaser, which publishes Linux and macOS (amd64/arm64) tarballs and a
