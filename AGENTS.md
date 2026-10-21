@@ -17,7 +17,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go`           | cobra commands (`gopyter`, `gopyter run`, `gopyter model`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `main.go` / `format.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
 | `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
