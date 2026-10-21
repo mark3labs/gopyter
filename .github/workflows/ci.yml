@@ -82,7 +82,7 @@ jobs:
           # older than the target ("the Go language version used to build
           # golangci-lint is lower than the targeted Go version"). Raise this
           # pin whenever the go.mod version moves.
-          version: v2.13.2
+          version: v2.15.0
 
   # Build every release target and archive exactly as a tag would, without
   # publishing, so a broken .goreleaser.yaml fails here and not at release
