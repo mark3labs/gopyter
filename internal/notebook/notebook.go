@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -73,16 +74,27 @@ func NewID() string {
 type multiline string
 
 func (m *multiline) UnmarshalJSON(b []byte) error {
+	b = bytes.TrimSpace(b)
+	if len(b) == 0 || (b[0] != '"' && b[0] != '[') {
+		return fmt.Errorf("expected a string or an array of strings")
+	}
 	var s string
 	if err := json.Unmarshal(b, &s); err == nil {
 		*m = multiline(s)
 		return nil
 	}
-	var ss []string
-	if err := json.Unmarshal(b, &ss); err != nil {
+	var parts []*string
+	if err := json.Unmarshal(b, &parts); err != nil {
 		return err
 	}
-	*m = multiline(strings.Join(ss, ""))
+	var source strings.Builder
+	for _, part := range parts {
+		if part == nil {
+			return fmt.Errorf("expected an array of strings")
+		}
+		source.WriteString(*part)
+	}
+	*m = multiline(source.String())
 	return nil
 }
 
@@ -290,9 +302,111 @@ func (nb *Notebook) Save(path string) error {
 	if err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	return WriteFile(path, b)
+}
+
+// WriteFile atomically writes data using a unique same-directory temporary file.
+// It preserves existing permission bits, or uses 0644 for a new file.
+func WriteFile(path string, data []byte) error {
+	mode := os.FileMode(0o644)
+	info, err := os.Stat(path)
+	if err == nil {
+		mode = info.Mode().Perm()
+	} else if !os.IsNotExist(err) {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// The file may already be closed or renamed on the successful path.
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name())
+	}()
+	if err := tmp.Chmod(mode); err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
+}
+
+// RewriteCode applies fn to every code cell source, preserving unknown JSON fields
+// and each source encoding (string or array). No partial result is returned on
+// error; unchanged documents are returned verbatim with changed set to false.
+func RewriteCode(data []byte, fn func(src string) (string, error)) (out []byte, changed bool, err error) {
+	var document map[string]json.RawMessage
+	if err := json.Unmarshal(data, &document); err != nil {
+		return nil, false, fmt.Errorf("invalid notebook: %w", err)
+	}
+	var cells []json.RawMessage
+	if err := json.Unmarshal(document["cells"], &cells); err != nil {
+		return nil, false, fmt.Errorf("invalid notebook cells: %w", err)
+	}
+	if bytes.Equal(bytes.TrimSpace(document["cells"]), []byte("null")) {
+		return nil, false, fmt.Errorf("invalid notebook cells: expected an array")
+	}
+	for i, raw := range cells {
+		var cell map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &cell); err != nil {
+			return nil, false, fmt.Errorf("cell %d: %w", i+1, err)
+		}
+		var kind string
+		if err := json.Unmarshal(cell["cell_type"], &kind); err != nil {
+			return nil, false, fmt.Errorf("cell %d: invalid cell_type: %w", i+1, err)
+		}
+		if kind != "code" {
+			continue
+		}
+		source, array, err := rewriteCellSource(cell["source"])
+		if err != nil {
+			return nil, false, fmt.Errorf("cell %d: invalid source: %w", i+1, err)
+		}
+		formatted, err := fn(source)
+		if err != nil {
+			return nil, false, fmt.Errorf("cell %d: %w", i+1, err)
+		}
+		if formatted == source {
+			continue
+		}
+		var value any = formatted
+		if array {
+			value = multiline(formatted)
+		}
+		cell["source"], err = json.Marshal(value)
+		if err != nil {
+			return nil, false, err
+		}
+		cells[i], err = json.Marshal(cell)
+		if err != nil {
+			return nil, false, err
+		}
+		changed = true
+	}
+	if !changed {
+		return data, false, nil
+	}
+	document["cells"], err = json.Marshal(cells)
+	if err != nil {
+		return nil, false, err
+	}
+	out, err = json.MarshalIndent(document, "", " ")
+	if err != nil {
+		return nil, false, err
+	}
+	return append(out, '\n'), true, nil
+}
+
+// rewriteCellSource shares multiline's validation while retaining the encoding.
+func rewriteCellSource(raw json.RawMessage) (string, bool, error) {
+	var source multiline
+	if err := json.Unmarshal(raw, &source); err != nil {
+		return "", false, err
+	}
+	return string(source), bytes.TrimSpace(raw)[0] == '[', nil
 }
