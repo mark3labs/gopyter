@@ -18,6 +18,93 @@ func check(t *testing.T, k *Kernel, id, src string) CheckResult {
 	return r
 }
 
+func TestCheckMatchesExecute(t *testing.T) {
+	k := newTestKernel(t)
+	if _, err := run(t, k, "seed", "var seed = 0"); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		id, src string
+		wantErr bool
+	}{
+		{"1", "x := 1", false},
+		{"2", "x + 1", false},
+		{"3", "func f() {}", false},
+		{"4", "f()", false},
+		{"5", "n := 2\nfunc() { n++ }()\nn", false},
+		{"6", "y := undefined", true},
+	}
+	for _, c := range cases {
+		t.Run(c.id, func(t *testing.T) {
+			assertUnchanged := snapshotCheckState(t, k)
+			r := check(t, k, c.id, c.src)
+			assertUnchanged()
+			if len(r.Missing) > 0 {
+				t.Fatalf("unexpected missing modules: %v", r.Missing)
+			}
+			out, err := run(t, k, c.id, c.src)
+			if (r.Errors == "") != (err == nil) || (err != nil) != c.wantErr {
+				t.Fatalf("Check: %+v; Execute: %q %v; wantErr: %v", r, out, err, c.wantErr)
+			}
+			if c.wantErr {
+				position := "In[" + c.id + "]:1:"
+				if !strings.Contains(r.Errors, position) || !strings.Contains(out, position) {
+					t.Errorf("want position %q in Check %q and Execute %q", position, r.Errors, out)
+				}
+			}
+		})
+	}
+}
+
+func TestCheckTestCell(t *testing.T) {
+	k := newTestKernel(t)
+	if _, err := run(t, k, "1", "x := 1"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnchanged := snapshotCheckState(t, k)
+	// Check uses go build on main.go even for %test: it compiles the
+	// declaration but does not build or run a test binary.
+	if r := check(t, k, "2", "%test\nfunc TestA(t *testing.T) {}"); !r.OK() {
+		t.Fatalf("check test cell: %+v", r)
+	}
+	assertUnchanged()
+	if _, err := os.Stat(filepath.Join(k.Dir, "main_test.go")); !os.IsNotExist(err) {
+		t.Fatalf("Check created main_test.go or stat failed: %v", err)
+	}
+}
+
+// snapshotCheckState guards both persisted declarations and Execute's program.
+func snapshotCheckState(t *testing.T, k *Kernel) func() {
+	t.Helper()
+	decls := k.Declarations()
+	file := filepath.Join(k.Dir, "main.go")
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if got := k.Declarations(); !slices.Equal(got, decls) {
+			t.Errorf("Check changed declarations: %v, want %v", got, decls)
+		}
+		after, err := os.ReadFile(file)
+		if err != nil || string(after) != string(before) {
+			t.Errorf("Check changed main.go content (%v)", err)
+		}
+		afterInfo, err := os.Stat(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !afterInfo.ModTime().Equal(info.ModTime()) {
+			t.Error("Check changed main.go mtime")
+		}
+	}
+}
+
 func TestCheck(t *testing.T) {
 	k := newTestKernel(t)
 	if _, err := run(t, k, "1", "type P struct{ X, Y int }\nn := 41"); err != nil {
