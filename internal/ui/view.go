@@ -588,8 +588,25 @@ func (m *Model) renderCell(i, width int) cellRender {
 		hint := t.subtle.Italic(true).Render(hintText)
 		r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
 	}
-	if selected || i == m.hoverCell {
-		// Bottom border with action buttons.
+	footer, zones := m.cellFooter(i, boxW, bar, blank, border)
+	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
+	r.lines = append(r.lines, footer)
+
+	out, zones := m.cellOutputs(i, boxW, bar, blank)
+	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
+	r.lines = append(r.lines, out...)
+	if m.stdinCell(c) || m.liveWidgets(c) {
+		line, zones := m.renderInputLine(i, c, boxW-2)
+		r.zones = append(r.zones, translate(zones, gutterWidth+2, len(r.lines))...)
+		r.lines = append(r.lines, bar+blank+"  "+line)
+	}
+	return r
+}
+
+// cellFooter draws the bottom border, with the cell's action buttons when
+// it is selected or hovered. Zones are relative to the line.
+func (m *Model) cellFooter(i, boxW int, bar, blank string, border lipgloss.Style) (string, []zone) {
+	if i == m.sel || i == m.hoverCell {
 		lb := &lineBuilder{}
 		lb.add(bar + blank)
 		probe := &lineBuilder{}
@@ -599,74 +616,72 @@ func (m *Model) renderCell(i, width int) cellRender {
 			lb.add(border.Render("╰" + strings.Repeat("─", fill)))
 			m.cellActions(lb, i, border, false)
 			lb.add(border.Render("─╯"))
-			r.zones = append(r.zones, translate(lb.zones, 0, len(r.lines))...)
-			r.lines = append(r.lines, lb.String())
-		} else {
-			r.lines = append(r.lines, bar+blank+boxBottom(boxW, border))
+			return lb.String(), lb.zones
 		}
-	} else {
-		r.lines = append(r.lines, bar+blank+boxBottom(boxW, border))
 	}
+	return bar + blank + boxBottom(boxW, border), nil
+}
 
-	// Outputs.
-	if c.kind == notebook.Code && len(c.outputs) > 0 {
-		live := m.liveWidgets(c)
-		focus := ""
-		if live {
-			focus = m.in.focus
-		}
-		if key := c.outputFingerprint(boxW-2, focus, live); key != c.outKey || c.outLines == nil {
-			c.outLines, c.outResultAt, c.outWidgets = m.renderOutputs(c, boxW-2, live, focus)
-			c.outKey = key
-		}
-		out, resultAt := c.outLines, c.outResultAt
-		hidden := 0
-		// Live widgets must stay reachable: don't fold them away.
-		if !c.expanded && !live && len(out) > maxOutputLines {
-			hidden = len(out) - maxOutputLines
-			out = out[hidden:]
-			resultAt -= hidden
-		}
-		foldAct := action{kind: actToggleOutput, cell: i}
-		foldStyle := t.muted
-		if m.hovered(foldAct) {
-			foldStyle = t.linkHover
-		}
-		foldAt := -1
-		if hidden > 0 {
-			out = append([]string{foldStyle.Render(fmt.Sprintf("⋯ %d earlier lines hidden · click or o to expand", hidden))}, out...)
-			resultAt++
-			foldAt = 0
-		} else if c.expanded && len(out) > maxOutputLines {
-			out = append(out, foldStyle.Render("⋯ click or o to collapse"))
-			foldAt = len(out) - 1
-		}
-		if foldAt >= 0 {
-			y := len(r.lines) + foldAt
-			x0 := gutterWidth + 2
-			r.zones = append(r.zones, zone{rect: image.Rect(x0, y, x0+lipgloss.Width(out[foldAt]), y+1), act: foldAct, tip: "toggle full output"})
-		}
-		if live {
-			top := 0
-			if foldAt == 0 {
-				top = 1
-			}
-			r.zones = append(r.zones, widgetZones(i, c.outWidgets, len(r.lines)+top-hidden, len(r.lines), len(r.lines)+len(out))...)
-		}
-		for j, l := range out {
-			lbl := blank
-			if j == resultAt {
-				lbl = padLeft(t.resultLabel.Render(fmt.Sprintf("Out[%d]", c.count)), gutterWidth-2) + " "
-			}
-			r.lines = append(r.lines, bar+lbl+"  "+l)
-		}
+// cellOutputs draws a code cell's outputs below its box: folding, the
+// Out[n] label and widget zones. Zones are relative to the first line.
+func (m *Model) cellOutputs(i, boxW int, bar, blank string) ([]string, []zone) {
+	t := m.theme
+	c := m.cells[i]
+	if c.kind != notebook.Code || len(c.outputs) == 0 {
+		return nil, nil
 	}
-	if m.stdinCell(c) || m.liveWidgets(c) {
-		line, zones := m.renderInputLine(i, c, boxW-2)
-		r.zones = append(r.zones, translate(zones, gutterWidth+2, len(r.lines))...)
-		r.lines = append(r.lines, bar+blank+"  "+line)
+	live := m.liveWidgets(c)
+	focus := ""
+	if live {
+		focus = m.in.focus
 	}
-	return r
+	if key := c.outputFingerprint(boxW-2, focus, live); key != c.outKey || c.outLines == nil {
+		c.outLines, c.outResultAt, c.outWidgets = m.renderOutputs(c, boxW-2, live, focus)
+		c.outKey = key
+	}
+	out, resultAt := c.outLines, c.outResultAt
+	hidden := 0
+	// Live widgets must stay reachable: don't fold them away.
+	if !c.expanded && !live && len(out) > maxOutputLines {
+		hidden = len(out) - maxOutputLines
+		out = out[hidden:]
+		resultAt -= hidden
+	}
+	foldAct := action{kind: actToggleOutput, cell: i}
+	foldStyle := t.muted
+	if m.hovered(foldAct) {
+		foldStyle = t.linkHover
+	}
+	foldAt := -1
+	if hidden > 0 {
+		out = append([]string{foldStyle.Render(fmt.Sprintf("⋯ %d earlier lines hidden · click or o to expand", hidden))}, out...)
+		resultAt++
+		foldAt = 0
+	} else if c.expanded && len(out) > maxOutputLines {
+		out = append(out, foldStyle.Render("⋯ click or o to collapse"))
+		foldAt = len(out) - 1
+	}
+	var zones []zone
+	if foldAt >= 0 {
+		x0 := gutterWidth + 2
+		zones = append(zones, zone{rect: image.Rect(x0, foldAt, x0+lipgloss.Width(out[foldAt]), foldAt+1), act: foldAct, tip: "toggle full output"})
+	}
+	if live {
+		top := 0
+		if foldAt == 0 {
+			top = 1
+		}
+		zones = append(zones, widgetZones(i, c.outWidgets, top-hidden, 0, len(out))...)
+	}
+	var lines []string
+	for j, l := range out {
+		lbl := blank
+		if j == resultAt {
+			lbl = padLeft(t.resultLabel.Render(fmt.Sprintf("Out[%d]", c.count)), gutterWidth-2) + " "
+		}
+		lines = append(lines, bar+lbl+"  "+l)
+	}
+	return lines, zones
 }
 
 // widgetZones returns the zones of widgets whose line 0 is at y0; only
