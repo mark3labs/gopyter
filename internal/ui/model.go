@@ -43,6 +43,7 @@ const (
 	overlayReview
 	overlayAsk
 	overlayModel
+	overlayPalette
 )
 
 type statusKind int
@@ -126,6 +127,7 @@ type Model struct {
 	assistant   Assistant // nil while AI is off
 	task        aiTask    // an AI fix or edit: in flight, then awaiting review
 	ask         askState
+	palette     paletteState
 	picker      modelPicker
 	vim         vimState
 	path        string
@@ -235,6 +237,8 @@ func New(opts Options) *Model {
 	m.input.Placeholder = "notebook.ipynb"
 	m.input.SetWidth(40)
 	m.picker.filter = newFilterInput()
+	m.palette.filter = newFilterInput()
+	m.palette.filter.Placeholder = "type a command"
 	m.in.line = newInputLine()
 
 	name := opts.Theme
@@ -356,6 +360,12 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input, cmd = m.input.Update(msg)
 			return m, cmd
 		}
+		if m.overlay == overlayPalette {
+			var cmd tea.Cmd
+			m.palette.filter, cmd = m.palette.filter.Update(msg)
+			m.refilterPalette()
+			return m, cmd
+		}
 		if m.overlay == overlayModel {
 			var cmd tea.Cmd
 			m.picker.filter, cmd = m.picker.filter.Update(msg)
@@ -412,6 +422,11 @@ func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(msg)
 		return m, cmd
 	}
+	if m.overlay == overlayPalette {
+		var cmd tea.Cmd
+		m.palette.filter, cmd = m.palette.filter.Update(msg)
+		return m, cmd
+	}
 	if m.overlay == overlayModel {
 		var cmd tea.Cmd
 		m.picker.filter, cmd = m.picker.filter.Update(msg)
@@ -449,6 +464,8 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.handleThemeKey(msg)
 	case overlayModel:
 		return m.handleModelPickerKey(msg)
+	case overlayPalette:
+		return m.handlePaletteKey(msg)
 	}
 
 	m.follow = true
@@ -885,6 +902,8 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 		m.overlay = overlayHelp
 	case "theme":
 		return m.openThemePicker()
+	case "palette":
+		return m.openPalette()
 	case "toggle_vim":
 		return m.toggleVim()
 	case "fix":

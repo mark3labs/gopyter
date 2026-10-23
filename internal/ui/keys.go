@@ -48,6 +48,7 @@ type keyMap struct {
 	Fix                     key.Binding
 	Ask                     key.Binding
 	AIModel                 key.Binding
+	Palette                 key.Binding
 	Quit                    key.Binding
 
 	// Edit mode
@@ -113,6 +114,7 @@ func newKeyMap() keyMap {
 		Fix:            b([]string{"f"}, "f", "AI fix error"),
 		Ask:            b([]string{"e"}, "e", "ask AI to edit"),
 		AIModel:        b([]string{"M"}, "M", "AI model / on-off"),
+		Palette:        b([]string{"ctrl+p", ":"}, "^p/:", "command palette"),
 		Quit:           b([]string{"q"}, "q", "quit"),
 
 		Escape: b([]string{"esc"}, "esc", "command mode"),
@@ -196,7 +198,7 @@ func (k keyMap) vimVisualShort() []key.Binding {
 
 // fullHelp returns the help overlay sections; vim adds its own. The AI
 // section needs AI support (aiAvailable); its fix keys only show while AI
-// is on. The help overlay is the one place that mentions AI while it's off.
+// is on. Help and the command palette may mention the model picker while AI is off.
 func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 	secs := k.baseHelp()
 	if aiAvailable {
@@ -244,7 +246,7 @@ func (k keyMap) baseHelp() []helpSection {
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.ExtendUp, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
-		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Sidebar, k.Theme, k.ToggleVim, k.Help, k.Quit}},
+		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Sidebar, k.Theme, k.ToggleVim, k.Palette, k.Help, k.Quit}},
 		{"Cell", []key.Binding{k.ToRaw, k.ToggleInput, k.ScrollLeft, k.ScrollRight, k.ExtEdit, k.CopyOutput}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,

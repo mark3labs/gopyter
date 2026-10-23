@@ -167,6 +167,8 @@ concatenation in WriteString") count as issues to fix too.
 
 ### UI (`internal/ui`)
 
+- Add new commands to `paletteCommands`; `TestPaletteCoversKeyMap` guards coverage.
+
 - Each new `keyMap` field needs a `keyCommands` entry with a permanent config
   name and mode. Use `withKey` for key text in tooltips and status hints;
   mouse actions use `commandKey(cell, name)`, never synthetic default keys.
@@ -232,7 +234,7 @@ concatenation in WriteString") count as issues to fix too.
   `--model`, the `ai_model`/`ai_off` settings). `ui.Options.AI` is nil in
   the noai build; while AI is off, `Model.assistant` is nil and nothing
   AI-related may be rendered, bound or started, except `M` in the help
-  overlay. Keep new AI features behind `m.assistant != nil`.
+  overlay and the command palette. Keep new AI features behind `m.assistant != nil`.
 - The model picker (`modelpicker.go`) lists kit's catalog (`ai.Catalog`)
   and, on its Ollama row, the server's installed models. Switching models
   goes through `setAI`, which cancels any request of the old model.

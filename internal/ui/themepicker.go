@@ -66,6 +66,7 @@ func (m *Model) applyTheme(name string) {
 	is.Blurred.Placeholder = lipgloss.NewStyle().Foreground(colSubtle)
 	m.input.SetStyles(is)
 	m.picker.filter.SetStyles(is)
+	m.palette.filter.SetStyles(is)
 	m.in.line.SetStyles(is)
 
 	m.htmlStyles = htmlview.Styles{

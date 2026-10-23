@@ -284,7 +284,8 @@ as in GoNB, variables stay in that cell.
 ## Keys
 
 gopyter is modal like Jupyter: **command mode** (blue) works on cells, **edit
-mode** (green) edits text. Press `?` for the full list.
+mode** (green) edits text. Press `?` for the full list, or `ctrl+p` (or `:`)
+to search and run any command.
 
 | Key                          | Action                                   |
 |------------------------------|------------------------------------------|
@@ -315,6 +316,7 @@ mode** (green) edits text. Press `?` for the full list.
 | `ctrl+b`                     | sidebar: contents and variables (`tab` switches) |
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
+| `ctrl+p` or `:`               | command palette: type to find a command, enter runs it |
 | `V`                          | turn vim bindings on / off (saved)       |
 | `M`                          | pick the AI model, or turn AI on / off   |
 | `e`                          | ask AI to write or change a cell (when AI is on) |
@@ -357,7 +359,7 @@ cursor, or of the enclosing call when the cursor is among its arguments;
 
 ### Custom keys
 
-The table above lists defaults. Run `gopyter keys` to list all 41 command names,
+The table above lists defaults. Run `gopyter keys` to list all command names,
 current keys, defaults and descriptions (`*` marks configured commands).
 Add a `keys` object to [config.json](#themes):
 
