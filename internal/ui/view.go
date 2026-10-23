@@ -177,7 +177,7 @@ func (m *Model) renderToolbar() string {
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
 		{act: action{kind: actSave}, full: "save", short: "save", tip: "save the notebook · ctrl+s", enabled: true},
-		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: "change the color theme · T", enabled: true},
+		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: "change the color theme · T", enabled: !m.themes.fixed},
 		{act: action{kind: actHelp}, full: "? help", short: "?", tip: "keyboard shortcuts · ?", enabled: true},
 	}
 	build := func(short bool) *lineBuilder {

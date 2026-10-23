@@ -17,11 +17,12 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go` / `format.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `main.go` / `format.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`, `gopyter serve`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
 | `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
+| `internal/serve`    | authenticated SSH notebook sessions, confined paths and per-session TUI lifecycle |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
 | `internal/palette`  | default dark and light colors shared by the UI and runner               |
@@ -190,6 +191,9 @@ concatenation in WriteString") count as issues to fix too.
   `Editor.vimMotion`, and vim edits wrap in `begin`/`end` so each command is
   one undo step. Visual mode uses the editor selection with an inclusive or
   linewise `selMode`; `vimSync` converts mouse selections.
+- Servers set the shared `col*` palette through `UseTheme` before sessions
+  start. With `FixedTheme`, models must only read it; never mutate it from a
+  session or enable the theme picker.
 - Themes (`themepicker.go`): `applyTheme` swaps the global palette and
   rebuilds everything derived from it (styles, highlighter, markdown
   renderers, help/input styles, cached cell renders). Anything new that
