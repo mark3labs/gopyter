@@ -17,11 +17,12 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go` / `format.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `main.go` / `format.go` / `keys.go` / `serve.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`, `gopyter keys`, `gopyter serve`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
 | `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
+| `internal/serve`    | authenticated SSH notebook sessions, confined paths and per-session TUI lifecycle |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
 | `internal/palette`  | default dark and light colors shared by the UI and runner               |
@@ -166,6 +167,12 @@ concatenation in WriteString") count as issues to fix too.
 
 ### UI (`internal/ui`)
 
+- Add new commands to `paletteCommands`; `TestPaletteCoversKeyMap` guards coverage.
+
+- Each new `keyMap` field needs a `keyCommands` entry with a permanent config
+  name and mode. Use `withKey` for key text in tooltips and status hints;
+  mouse actions use `commandKey(cell, name)`, never synthetic default keys.
+
 - `Model` uses pointer receivers. `View()` intentionally records render-time
   layout: `m.layout` holds cell geometry and `m.zones` holds clickable
   rectangles, both rebuilt on every render and used for hit-testing.
@@ -182,7 +189,8 @@ concatenation in WriteString") count as issues to fix too.
   with Ultraviolet in `composite`. While an overlay is open, only its zones
   are interactive.
 - Kitty images (`graphics.go`): View queues transmission/placement and sweeps
-  references with `Retain` (including trash for undo). A coalesced asynchronous
+  references with `Retain` (including deleted cells and saved merge outputs in
+  cell undo history). A coalesced asynchronous
   `graphicsMsg` lets Update emit `tea.Raw` outside the styled frame. Pixel cell
   size changes invalidate output caches; theme changes reuse image keys.
   `composite` must exempt placeholders from backdrop dimming: their foreground
@@ -196,6 +204,9 @@ concatenation in WriteString") count as issues to fix too.
   `Editor.vimMotion`, and vim edits wrap in `begin`/`end` so each command is
   one undo step. Visual mode uses the editor selection with an inclusive or
   linewise `selMode`; `vimSync` converts mouse selections.
+- Servers set the shared `col*` palette through `UseTheme` before sessions
+  start. With `FixedTheme`, models must only read it; never mutate it from a
+  session or enable the theme picker.
 - Themes (`themepicker.go`): `applyTheme` swaps the global palette and
   rebuilds everything derived from it (styles, highlighter, markdown
   renderers, help/input styles, cached cell renders). Anything new that
@@ -230,7 +241,7 @@ concatenation in WriteString") count as issues to fix too.
   `--model`, the `ai_model`/`ai_off` settings). `ui.Options.AI` is nil in
   the noai build; while AI is off, `Model.assistant` is nil and nothing
   AI-related may be rendered, bound or started, except `M` in the help
-  overlay. Keep new AI features behind `m.assistant != nil`.
+  overlay and the command palette. Keep new AI features behind `m.assistant != nil`.
 - The model picker (`modelpicker.go`) lists kit's catalog (`ai.Catalog`)
   and, on its Ollama row, the server's installed models. Switching models
   goes through `setAI`, which cancels any request of the old model.

@@ -85,15 +85,6 @@ func rootCmd() *cobra.Command {
 			if len(args) == 1 {
 				path = args[0]
 			}
-			nb, err := loadNotebook(path)
-			if err != nil {
-				return err
-			}
-			k, err := kernel.New(workdir)
-			if err != nil {
-				return err
-			}
-			defer closeKernel(k)
 			settings := loadSettings(cmd)
 			name, err := resolveTheme(cmd, theme, settings)
 			if err != nil {
@@ -111,21 +102,20 @@ func rootCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			opts := ui.Options{
-				Graphics: gfx,
-				Path:     path, Notebook: nb, Kernel: k,
-				Vim: vim, SaveVim: saveVim,
-				Theme: name, SyntaxTheme: syntax, SaveTheme: saveTheme,
-				// Probe before the TUI takes over the terminal, so the
-				// query can't race the program's input reader.
-				LightBackground: !lipgloss.HasDarkBackground(os.Stdin, os.Stdout),
+			_, warnings := ui.KeyCommands(settings.Keys)
+			for _, w := range warnings {
+				cmd.PrintErrf("gopyter: key bindings: %s\n", w)
 			}
-			if !noComplete {
-				engine := complete.New(k)
-				defer func() { _ = engine.Close() }()
-				opts.Completer = engine
+			opts, cleanup, err := sessionOptions(path, workdir, noComplete, vim, aiModel, aiOn)
+			if err != nil {
+				return err
 			}
-			opts.AI = newAI(aiModel, aiOn)
+			opts.Graphics = gfx
+			opts.Keys = settings.Keys
+			defer cleanup()
+			opts.Theme, opts.SyntaxTheme, opts.SaveTheme = name, syntax, saveTheme
+			// Probe before the program owns stdin.
+			opts.LightBackground = !lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 			return ui.Run(cmd.Context(), opts)
 		},
 	}
@@ -137,7 +127,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd())
+	cmd.AddCommand(runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd(), keysCmd(), serveCmd(&workdir))
 	return cmd
 }
 
@@ -287,6 +277,31 @@ func themesCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+// sessionOptions shares notebook, kernel, completion and AI setup between local
+// and SSH frontends. Cleanup must run only after the UI has cancelled its work.
+func sessionOptions(path, workdir string, noComplete, vim bool, model string, aiOn bool) (ui.Options, func(), error) {
+	nb, err := loadNotebook(path)
+	if err != nil {
+		return ui.Options{}, nil, err
+	}
+	k, err := kernel.New(workdir)
+	if err != nil {
+		return ui.Options{}, nil, err
+	}
+	opts := ui.Options{Path: path, Notebook: nb, Kernel: k, Vim: vim, SaveVim: saveVim, AI: newAI(model, aiOn)}
+	var engine *complete.Engine
+	if !noComplete {
+		engine = complete.New(k)
+		opts.Completer = engine
+	}
+	return opts, func() {
+		if engine != nil {
+			_ = engine.Close()
+		} // Completion cleanup is best effort.
+		closeKernel(k)
+	}, nil
 }
 
 // closeKernel removes the kernel workspace, reporting (but not failing on)

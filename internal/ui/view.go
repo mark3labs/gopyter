@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ func (m *Model) viewHeight() int { return max(m.height-headerHeight-footerHeight
 // minus its borders (renderCell). Shell commands run in a terminal of
 // this width, so programs wrap where the output is shown.
 func (m *Model) outWidth() int {
-	return m.width - 1 - cellMarginR - gutterWidth - 2
+	return m.bodyWidth() - 1 - cellMarginR - gutterWidth - 2
 }
 
 func (m *Model) View() tea.View {
@@ -169,17 +170,18 @@ func (m *Model) renderToolbar() string {
 	t := m.theme
 	rule := lipgloss.NewStyle().Foreground(colFaint)
 	items := []toolItem{
-		{act: action{kind: actRunSelected}, full: "▶ run", short: "▶", tip: "run the selected cell · shift+enter / ctrl+r", enabled: true},
-		{act: action{kind: actRunAll}, full: "▶▶ run all", short: "▶▶", tip: "run all cells · A", enabled: true},
-		{act: action{kind: actInterrupt}, full: "■ stop", short: "■", tip: "interrupt execution · ctrl+c", enabled: m.busy()},
-		{act: action{kind: actRestart}, full: "↻ restart", short: "↻", tip: "restart the kernel, clearing all declarations · R", enabled: true},
+		{act: action{kind: actRunSelected}, full: "▶ run", short: "▶", tip: withKey("run the selected cell", m.keys.RunAdvance), enabled: true},
+		{act: action{kind: actRunAll}, full: "▶▶ run all", short: "▶▶", tip: withKey("run all cells", m.keys.RunAll), enabled: true},
+		{act: action{kind: actInterrupt}, full: "■ stop", short: "■", tip: withKey("interrupt execution", m.keys.Interrupt), enabled: m.busy()},
+		{act: action{kind: actRestart}, full: "↻ restart", short: "↻", tip: withKey("restart the kernel, clearing all declarations", m.keys.Restart), enabled: true},
 		{sep: true},
-		{act: action{kind: actAddCode, cell: m.sel + 1}, full: "+ code", short: "+go", tip: "insert a code cell below · b", enabled: true},
+		{act: action{kind: actAddCode, cell: m.sel + 1}, full: "+ code", short: "+go", tip: withKey("insert a code cell below", m.keys.InsertBelow), enabled: true},
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
-		{act: action{kind: actSave}, full: "save", short: "save", tip: "save the notebook · ctrl+s", enabled: true},
-		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: "change the color theme · T", enabled: true},
-		{act: action{kind: actHelp}, full: "? help", short: "?", tip: "keyboard shortcuts · ?", enabled: true},
+		{act: action{kind: actSave}, full: "save", short: "save", tip: withKey("save the notebook", m.keys.Save), enabled: true},
+		{act: action{kind: actToggleSidebar}, full: "☰ sidebar", short: "☰", tip: withKey("contents and variables", m.keys.Sidebar), enabled: true},
+		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: !m.themes.fixed},
+		{act: action{kind: actHelp}, full: "? help", short: "?", tip: withKey("keyboard shortcuts", m.keys.Help), enabled: true},
 	}
 	build := func(short bool) *lineBuilder {
 		lb := &lineBuilder{}
@@ -221,7 +223,7 @@ func (m *Model) renderFooter() string {
 	t := m.theme
 	pill := t.modeCmd.Render("COMMAND")
 	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
-	tip := "switch to edit mode · enter"
+	tip := withKey("switch to edit mode", m.keys.Edit)
 	if m.inputFocused() {
 		pill = t.modeInsert.Render("INPUT")
 		bindings = m.keys.inputShort(m.in.focus == focusStdin)
@@ -229,7 +231,7 @@ func (m *Model) renderFooter() string {
 	} else if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
 		bindings = m.keys.editShort()
-		tip = "switch to command mode · esc"
+		tip = withKey("switch to command mode", m.keys.Escape)
 		if m.vim.enabled {
 			st := t.modeEdit
 			switch m.vim.mode {
@@ -245,12 +247,20 @@ func (m *Model) renderFooter() string {
 			pill = st.Render(m.vim.mode.String())
 		}
 	}
+	if m.mode == modeCommand && m.side.focused && m.sidebarWidth() > 0 {
+		bindings = m.keys.sidebarShort()
+	}
 	toggle := action{kind: actToggleMode}
 	if m.hovered(toggle) {
 		pill = t.btnHover.Render(ansi.Strip(pill))
 	}
 	m.zones = append(m.zones, zone{rect: image.Rect(0, m.height-1, lipgloss.Width(pill), m.height), act: toggle, tip: tip})
-	pos := t.muted.Render(fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells)))
+	position := fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells))
+	if m.multiSelected() {
+		lo, hi := m.selRange()
+		position = fmt.Sprintf("cells %d–%d/%d ", lo+1, hi+1, len(m.cells))
+	}
+	pos := t.muted.Render(position)
 	avail := m.width - lipgloss.Width(pill) - lipgloss.Width(pos) - 5
 
 	var mid string
@@ -276,6 +286,8 @@ func (m *Model) renderFooter() string {
 		mid = t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
 			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+	} else if d, ok := m.diagAtCursor(); ok {
+		mid = diagIcon(d.Severity) + " " + t.dim.Render(d.Message)
 	} else if m.hoverTip != "" {
 		mid = lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip)
 	} else if m.pendingKey != "" {
@@ -293,7 +305,7 @@ func (m *Model) renderFooter() string {
 
 // renderBody renders the scrollable list of cells and computes the cursor.
 func (m *Model) renderBody() (string, *tea.Cursor) {
-	w := m.width - 1 // leave room for the scrollbar
+	w := m.bodyWidth() - 1 // leave room for the scrollbar
 	vh := m.viewHeight()
 
 	var all []string
@@ -390,6 +402,13 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 		out[y] = line
 	}
 
+	if m.sidebarWidth() > 0 {
+		side, zs := m.renderSidebar(vh)
+		for y := range out {
+			out[y] += side[y]
+		}
+		m.zones = append(m.zones, translate(zs, m.bodyWidth(), headerHeight)...)
+	}
 	var cursor *tea.Cursor
 	if m.mode == modeEdit && m.sel < len(m.layout) {
 		l := m.layout[m.sel]
@@ -447,8 +466,8 @@ func (m *Model) renderCell(i, width int) cellRender {
 	if c.kind != notebook.Code {
 		c.images = nil
 	}
-	selected := i == m.sel
-	editing := selected && m.mode == modeEdit
+	selected := m.inRange(i)
+	editing := i == m.sel && m.mode == modeEdit
 
 	borderColor := t.borderIdle
 	switch {
@@ -488,7 +507,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 		// The spacer line below a rendered markdown cell hosts its action
 		// buttons when selected or hovered, so the layout never shifts.
 		r.ownSpacer = true
-		if selected || i == m.hoverCell {
+		if i == m.sel || i == m.hoverCell {
 			probe := &lineBuilder{}
 			m.cellActions(probe, i, lipgloss.NewStyle(), true)
 			lb := &lineBuilder{}
@@ -564,7 +583,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 	}
 	r.lines = append(r.lines, bar+blank+boxTop(boxW, border, title, badge))
 
-	ev := c.ed.Render(innerW, editing, m.hl, t)
+	ev := c.ed.Render(innerW, editing, m.hl, t, m.diagMarks(c))
 	r.ev, r.hasEdit = ev, true
 	r.edTop = len(r.lines)
 	if c.kind == notebook.Code && labelW > 0 {
@@ -573,24 +592,40 @@ func (m *Model) renderCell(i, width int) cellRender {
 	}
 	r.edLeft = gutterWidth + 2
 	side := border.Render("│")
-	for j, l := range ev.lines {
-		lbl := blank
-		if j == 0 {
-			lbl = label
+	if c.inputHidden() && !editing && c.kind != notebook.Markdown {
+		r.hasEdit = false
+		act := action{kind: actToggleInput, cell: i}
+		st := t.muted
+		if m.hovered(act) {
+			st = t.linkHover
 		}
-		r.lines = append(r.lines, bar+lbl+side+" "+padRight(l, innerW)+" "+side)
-	}
-	if c.ed.Value() == "" && !editing {
-		// Placeholder hint on empty cells.
-		idx := r.edTop
-		hintText := "Go code… (enter to edit, shift+enter to run)"
-		if m.editable(c) {
-			hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+		show := "click to show"
+		if m.keys.ToggleInput.Enabled() {
+			show = "click or " + m.keys.ToggleInput.Help().Key + " to show"
 		}
-		// Narrow cells cut the hint rather than overflow the box.
-		hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")
-		hint := t.subtle.Italic(true).Render(hintText)
-		r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
+		text := ansi.Truncate(fmt.Sprintf("⋯ %d lines hidden · %s", len(c.ed.lines), show), innerW, "…")
+		r.lines = append(r.lines, bar+label+side+" "+padRight(st.Render(text), innerW)+" "+side)
+		r.zones = append(r.zones, zone{rect: image.Rect(gutterWidth+2, r.edTop, gutterWidth+2+lipgloss.Width(text), r.edTop+1), act: act, tip: withKey("show the cell's code", m.keys.ToggleInput)})
+	} else {
+		for j, l := range ev.lines {
+			lbl := blank
+			if j == 0 {
+				lbl = label
+			}
+			r.lines = append(r.lines, bar+lbl+side+" "+padRight(l, innerW)+" "+side)
+		}
+		if c.ed.Value() == "" && !editing {
+			// Placeholder hint on empty cells.
+			idx := r.edTop
+			hintText := "Go code… (enter to edit, shift+enter to run)"
+			if m.editable(c) {
+				hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+			}
+			// Narrow cells cut the hint rather than overflow the box.
+			hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")
+			hint := t.subtle.Italic(true).Render(hintText)
+			r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
+		}
 	}
 	footer, zones := m.cellFooter(i, boxW, bar, blank, border)
 	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
@@ -688,6 +723,21 @@ func (m *Model) cellOutputs(i, boxW int, bar, blank string) ([]string, []zone) {
 		}
 		lines = append(lines, bar+lbl+"  "+l)
 	}
+	if c.noWrap {
+		lb := &lineBuilder{}
+		lb.add(bar + blank + "  ")
+		lb.button(action{kind: actScrollOutLeft, cell: i}, withKey("scroll left", m.keys.ScrollLeft), t.muted.Render("◂"))
+		if c.textW > boxW-2 {
+			lb.add(fmt.Sprintf(" cols %d–%d of %d ", c.scrollX+1, min(c.scrollX+boxW-2, c.textW), c.textW))
+		} else {
+			lb.add(" ")
+		}
+		lb.button(action{kind: actScrollOutRight, cell: i}, withKey("scroll right", m.keys.ScrollRight), t.muted.Render("▸"))
+		lb.add(" · " + withKey(withKey("scroll", m.keys.ScrollLeft), m.keys.ScrollRight) + " · ")
+		lb.button(action{kind: actToggleWrap, cell: i}, "wrap output", t.muted.Render("wrap"))
+		zones = append(zones, translate(lb.zones, 0, len(lines))...)
+		lines = append(lines, lb.String())
+	}
 	return lines, zones
 }
 
@@ -766,9 +816,9 @@ func (m *Model) renderInputLine(i int, c *Cell, width int) (string, []zone) {
 // its tooltip, and the target type's name.
 func (m *Model) convertAction(i int) (action, string, string) {
 	if m.cells[i].kind == notebook.Code {
-		return action{kind: actToMarkdown, cell: i}, "convert to markdown · m", "markdown"
+		return action{kind: actToMarkdown, cell: i}, withKey("convert to markdown", m.keys.ToMarkdown), "markdown"
 	}
-	return action{kind: actToCode, cell: i}, "convert to go code · y", "go"
+	return action{kind: actToCode, cell: i}, withKey("convert to go code", m.keys.ToCode), "go"
 }
 
 // cellActions appends the per-cell action buttons.
@@ -781,14 +831,14 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		tip    string
 		danger bool
 	}
-	run := btn{action{kind: actRunCell, cell: i}, "▶", "run cell · ctrl+enter", false}
+	run := btn{action{kind: actRunCell, cell: i}, "▶", withKey("run cell", m.keys.Run), false}
 	switch {
 	case markdown:
-		run = btn{action{kind: actEditCell, cell: i}, "✎", "edit cell · enter", false}
+		run = btn{action{kind: actEditCell, cell: i}, "✎", withKey("edit cell", m.keys.Edit), false}
 	case c.kind == notebook.Markdown:
-		run.tip = "render markdown · ctrl+enter"
+		run.tip = withKey("render markdown", m.keys.Run)
 	case m.running != nil && m.running.cellID == c.id:
-		run = btn{action{kind: actInterrupt}, "■", "stop execution · ctrl+c", false}
+		run = btn{action{kind: actInterrupt}, "■", withKey("stop execution", m.keys.Interrupt), false}
 	}
 	convAct, convTip, convTo := m.convertAction(i)
 	convIcon := "md"
@@ -798,19 +848,19 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 	btns := []btn{
 		run,
 		{convAct, "⇄" + convIcon, convTip, false},
-		{action{kind: actMoveUp, cell: i}, "↑", "move cell up · K", false},
-		{action{kind: actMoveDown, cell: i}, "↓", "move cell down · J", false},
+		{action{kind: actMoveUp, cell: i}, "↑", withKey("move cell up", m.keys.MoveUp), false},
+		{action{kind: actMoveDown, cell: i}, "↓", withKey("move cell down", m.keys.MoveDown), false},
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
-		{action{kind: actDeleteCell, cell: i}, "✕", "delete cell · dd", true},
+		{action{kind: actDeleteCell, cell: i}, "✕", withKey("delete cell", m.keys.Delete), true},
 	}
 	if c.kind == notebook.Code {
 		btns = append(btns, btn{action{kind: actFormatCell, cell: i}, "fmt", "format Go code · alt+shift+f", false})
 	}
 	switch {
 	case !markdown && m.fixable(c):
-		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.assistant.Model() + ") · f", false}}, btns...)
+		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", withKey("fix the error with AI ("+m.assistant.Model()+")", m.keys.Fix), false}}, btns...)
 	case !markdown && m.editable(c):
-		btns = append([]btn{{action{kind: actAskCell, cell: i}, "✦", "ask AI to change this cell (" + m.assistant.Model() + ") · e", false}}, btns...)
+		btns = append([]btn{{action{kind: actAskCell, cell: i}, "✦", withKey("ask AI to change this cell ("+m.assistant.Model()+")", m.keys.Ask), false}}, btns...)
 	}
 	sep := frame.Render("─")
 	if markdown {
@@ -842,6 +892,8 @@ func langTitle(kind notebook.CellType) string {
 	return "go"
 }
 
+const noWrapWidth = 1 << 14
+
 // renderOutputs renders the outputs of a cell, also returning the index of
 // the first result line (or -1) and the widgets of HTML outputs, positioned
 // in the lines. live widgets are interactive, focus is focused.
@@ -855,6 +907,20 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 	var out []string
 	var widgets []htmlview.Widget
 	resultAt := -1
+	c.textW = 0
+	textWidth := width
+	if c.noWrap {
+		textWidth = noWrapWidth
+	}
+	appendText := func(lines []string) {
+		for _, l := range lines {
+			c.textW = max(c.textW, lipgloss.Width(l))
+			if c.noWrap {
+				l = ansi.Cut(l, c.scrollX, c.scrollX+width)
+			}
+			out = append(out, l)
+		}
+	}
 	for _, o := range c.outputs {
 		if (o.Kind == notebook.Result || o.Kind == notebook.ImageOut) && resultAt < 0 {
 			resultAt = len(out)
@@ -870,12 +936,12 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 			}
 			out = append(out, lines...)
 		case notebook.Stdout:
-			out = append(out, termLines(o.Text, t.stdout, width)...)
+			appendText(termLines(o.Text, t.stdout, textWidth))
 		case notebook.Stderr:
-			out = append(out, termLines(o.Text, t.stderr, width)...)
+			appendText(termLines(o.Text, t.stderr, textWidth))
 		case notebook.Result:
-			for _, l := range wrapLines(normalizeOutput(o.Text), width) {
-				out = append(out, t.result.Render(l))
+			for _, l := range wrapLines(normalizeOutput(o.Text), textWidth) {
+				appendText([]string{t.result.Render(l)})
 			}
 		case notebook.MarkdownOut:
 			out = append(out, m.md.Render(o.Text, width, nil)...)
@@ -950,30 +1016,57 @@ func (m *Model) renderOverlay() (string, []zone) {
 		var grid string
 		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.assistant != nil) {
 			var rows []string
-			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
+			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title))
+			keyWidth := 8
 			for _, b := range sec.keys {
+				if b.Enabled() {
+					keyWidth = max(keyWidth, min(12, ansi.StringWidth(b.Help().Key)))
+				}
+			}
+			for _, b := range sec.keys {
+				if !b.Enabled() {
+					continue
+				}
 				h := b.Help()
-				rows = append(rows, t.helpKey.Width(8).Render(h.Key)+t.helpDesc.Render(h.Desc))
+				rows = append(rows, t.helpKey.Width(keyWidth).Render(ansi.Truncate(h.Key, keyWidth, "…"))+t.helpDesc.Render(ansi.Truncate(h.Desc, 26-keyWidth, "…")))
 			}
 			cols = append(cols, lipgloss.NewStyle().Width(26).Render(strings.Join(rows, "\n")))
 		}
 		// Lay the sections out in as many columns as fit.
 		perRow := clamp((m.width-10)/26, 1, len(cols))
-		var rowsOut []string
-		for i := 0; i < len(cols); i += perRow {
-			if i > 0 {
-				rowsOut = append(rowsOut, "")
+		// Stack sections in the shortest column rather than reserving a full
+		// grid row for short sections (notably AI and cell commands).
+		// Place tall sections first so added commands do not strand a tall
+		// editing section below an already crowded column.
+		slices.SortStableFunc(cols, func(a, b string) int { return lipgloss.Height(b) - lipgloss.Height(a) })
+		stacks := make([]string, perRow)
+		for _, col := range cols {
+			idx := 0
+			for j := 1; j < len(stacks); j++ {
+				if lipgloss.Height(stacks[j]) < lipgloss.Height(stacks[idx]) {
+					idx = j
+				}
 			}
-			rowsOut = append(rowsOut, lipgloss.JoinHorizontal(lipgloss.Top, cols[i:min(i+perRow, len(cols))]...))
+			if stacks[idx] == "" {
+				stacks[idx] = col
+			} else {
+				stacks[idx] += "\n" + col
+			}
 		}
-		grid = lipgloss.JoinVertical(lipgloss.Left, rowsOut...)
+		grid = lipgloss.JoinHorizontal(lipgloss.Top, stacks...)
 		tips := t.muted.Render("Top-level func/type/var/const/import declarations persist across cells.\n" +
 			"Other statements run in main(); a trailing expression is displayed.\n" +
 			"Use !cmd for shell commands (e.g. !go get …) and %help for magics.\n" +
-			"Mouse: click to select/edit, drag to select text, right-click for a menu.")
+			"Mouse: click to select/edit, drag to select text, right-click for a menu.\n" +
+			"Keys can be changed in config.json (\"keys\"); see gopyter keys.")
+		if m.height <= 40 {
+			content := lipgloss.JoinVertical(lipgloss.Left, title("◆ Keyboard shortcuts"), grid,
+				t.subtle.Render("click or press any key to close"))
+			return box.Padding(0, dlgPadX).MaxWidth(m.width).Render(content), nil
+		}
 		content := lipgloss.JoinVertical(lipgloss.Left, title("◆ Keyboard shortcuts"), "", grid, "", tips, "",
 			t.subtle.Render("click or press any key to close"))
-		return box.Render(content), nil
+		return box.MaxWidth(m.width).Render(content), nil
 
 	case overlayQuit:
 		return dialog(colWarning, []string{
@@ -1017,6 +1110,8 @@ func (m *Model) renderOverlay() (string, []zone) {
 
 	case overlayModel:
 		return m.renderModelPicker()
+	case overlayPalette:
+		return m.renderPalette()
 	}
 	return "", nil
 }

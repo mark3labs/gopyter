@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image"
 	"slices"
 	"strings"
@@ -24,10 +25,15 @@ const (
 	actInterrupt
 	actRestart
 	actClearAllOutput
+	actRestartClear
+	actSaveAs
 	actSave
 	actHelp
 	actTheme
 	actToggleMode
+	actToggleSidebar
+	actSidebarPanel
+	actSidebarItem
 
 	// Per cell (action.cell is the cell index).
 	actRunCell
@@ -41,11 +47,19 @@ const (
 	actMoveDown
 	actDuplicate
 	actDeleteCell
+	actMergeCells
+	actSplitCell
 	actToMarkdown
 	actToCode
 	actClearOutput
 	actToggleOutput
 	actCopyOutput
+	actToRaw
+	actToggleInput
+	actScrollOutLeft
+	actScrollOutRight
+	actToggleWrap
+	actExtEdit
 	actFixCell     // ask the AI to fix the cell's error
 	actFocusStdin  // type input for the running program
 	actInputDone   // end the running program's input
@@ -77,6 +91,7 @@ const (
 	actCompletionItem // action.cell is the completion item index
 	actThemeItem      // action.cell is the theme picker entry index
 	actModelItem      // action.cell is the model picker row index
+	actPaletteItem    // action.cell is the command palette row index
 )
 
 type action struct {
@@ -182,7 +197,10 @@ func (m *Model) zoneAt(x, y int) (zone, bool) {
 }
 
 // cellAtScreen returns the index of the cell under screen row y, or -1.
-func (m *Model) cellAtScreen(y int) int {
+func (m *Model) cellAtScreen(x, y int) int {
+	if x >= m.bodyWidth() {
+		return -1
+	}
 	if y < headerHeight || y >= m.height-footerHeight {
 		return -1
 	}
@@ -200,7 +218,7 @@ func (m *Model) hoverAt(x, y int) (action, string, int) {
 	z, _ := m.zoneAt(x, y)
 	cell := -1
 	if m.overlay == overlayNone {
-		cell = m.cellAtScreen(y)
+		cell = m.cellAtScreen(x, y)
 	}
 	return z.act, z.tip, cell
 }
@@ -235,6 +253,9 @@ func (m *Model) handleMouseMotion(ms tea.Mouse) tea.Cmd {
 	}
 	if m.overlay == overlayModel && m.hover.kind == actModelItem {
 		m.picker.idx = m.hover.cell
+	}
+	if m.overlay == overlayPalette && m.hover.kind == actPaletteItem {
+		m.palette.idx = m.hover.cell
 	}
 	if m.comp.open && m.hover.kind == actCompletionItem {
 		m.comp.idx = m.hover.cell
@@ -287,23 +308,40 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	if ms.Button != tea.MouseLeft {
 		return nil
 	}
+	if ms.X < m.bodyWidth() && ms.Y >= headerHeight {
+		m.side.focused = false
+	}
+	// Shift-click extends cells even over their action zones, but leaves
+	// shift-click text selection in the active editor alone.
+	if i := m.cellAtScreen(ms.X, ms.Y); i >= 0 && ms.Mod&tea.ModShift != 0 && (m.mode != modeEdit || i != m.sel) {
+		m.follow = false
+		m.leaveEdit()
+		m.extendTo(i)
+		return nil
+	}
 	if z, ok := m.zoneAt(ms.X, ms.Y); ok {
 		return m.doAction(z.act)
 	}
+	if m.sidebarWidth() > 0 && ms.X >= m.bodyWidth() && ms.Y >= headerHeight && ms.Y < m.height-footerHeight {
+		m.leaveEdit()
+		m.side.focused = true
+		return nil
+	}
 
 	// Scrollbar.
-	if ms.X == m.width-1 && ms.Y >= headerHeight && ms.Y < m.height-footerHeight && m.contentLines > m.viewHeight() {
+	if ms.X == m.bodyWidth()-1 && ms.Y >= headerHeight && ms.Y < m.height-footerHeight && m.contentLines > m.viewHeight() {
 		m.drag = dragState{kind: dragScroll}
 		m.scrollTo(ms.Y)
 		return nil
 	}
 
-	i := m.cellAtScreen(ms.Y)
+	i := m.cellAtScreen(ms.X, ms.Y)
 	if i < 0 {
 		return nil
 	}
 	m.follow = false
 	m.sel = i
+	m.collapse()
 	c := m.cells[i]
 	l := m.layout[i]
 	r := l.render
@@ -398,6 +436,15 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 		}
 		return nil
 	}
+	if m.overlay == overlayPalette {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.movePalette(-1)
+		case tea.MouseWheelDown:
+			m.movePalette(1)
+		}
+		return nil
+	}
 	if m.overlay == overlayModel {
 		switch ms.Button {
 		case tea.MouseWheelUp:
@@ -433,6 +480,16 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 		}
 		m.closeCompletion()
 	}
+	if m.sidebarWidth() > 0 && ms.X >= m.bodyWidth() && ms.Y >= headerHeight && ms.Y < m.height-footerHeight {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.side.top -= 3
+		case tea.MouseWheelDown:
+			m.side.top += 3
+		}
+		m.clampSidebar(false)
+		return nil
+	}
 	m.follow = false
 	switch ms.Button {
 	case tea.MouseWheelUp:
@@ -459,6 +516,10 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 		if !inside {
 			return m.cancelTheme()
 		}
+	case overlayPalette:
+		if !inside {
+			m.closePalette()
+		}
 	case overlayModel:
 		if !inside {
 			m.closeModelPicker()
@@ -482,12 +543,26 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 // openContextMenu shows a context menu for whatever is under the pointer.
 func (m *Model) openContextMenu(x, y int) tea.Cmd {
 	m.closeCompletion()
-	i := m.cellAtScreen(y)
+	i := m.cellAtScreen(x, y)
 	if i < 0 {
 		return nil
 	}
-	m.sel = i
+	if m.mode == modeEdit && i != m.sel {
+		m.leaveEdit()
+	}
+	m.focusCell(i)
 	c := m.cells[i]
+	label := func(verb string) string {
+		lo, hi := m.selRange()
+		if hi > lo {
+			return fmt.Sprintf("%s %d cells", verb, hi-lo+1)
+		}
+		return verb + " cell"
+	}
+	mergeLabel := "Merge with next"
+	if m.multiSelected() {
+		mergeLabel = "Merge cells"
+	}
 	a := func(k actionKind) action { return action{kind: k, cell: i} }
 	var items []menuItem
 
@@ -508,59 +583,90 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		items = append(items,
 			menuItem{label: "Paste", key: "", act: a(actPasteText)},
 			menuItem{label: "Select all", act: a(actSelectAll)},
+			menuItem{label: "Split cell here", key: m.keys.Split.Help().Key, act: a(actSplitCell)},
 			menuItem{sep: true})
 	}
 
 	if c.kind == notebook.Code {
 		if m.running != nil && m.running.cellID == c.id {
-			items = append(items, menuItem{label: "■ Stop", key: "^c", act: a(actInterrupt)})
+			items = append(items, menuItem{label: "■ Stop", key: m.keys.Interrupt.Help().Key, act: a(actInterrupt)})
 		} else {
-			items = append(items, menuItem{label: "▶ Run cell", key: "^↵", act: a(actRunCell)})
+			items = append(items, menuItem{label: "▶ " + label("Run"), key: m.keys.Run.Help().Key, act: a(actRunCell)})
 		}
 		if m.fixable(c) {
-			items = append(items, menuItem{label: "✦ Fix with AI", key: "f", act: a(actFixCell)})
+			items = append(items, menuItem{label: "✦ Fix with AI", key: m.keys.Fix.Help().Key, act: a(actFixCell)})
 		}
 		if m.editable(c) {
-			items = append(items, menuItem{label: "✦ Ask AI…", key: "e", act: a(actAskCell)})
+			items = append(items, menuItem{label: "✦ Ask AI…", key: m.keys.Ask.Help().Key, act: a(actAskCell)})
 		}
 	} else {
-		items = append(items, menuItem{label: "▶ Render", key: "^↵", act: a(actRunCell)})
+		items = append(items, menuItem{label: "▶ " + label("Render"), key: m.keys.Run.Help().Key, act: a(actRunCell)})
 	}
 	if m.mode != modeEdit || i != m.sel {
-		items = append(items, menuItem{label: "✎ Edit", key: "↵", act: a(actEditCell)})
+		items = append(items, menuItem{label: "✎ Edit", key: m.keys.Edit.Help().Key, act: a(actEditCell)})
 	}
 	items = append(items,
 		menuItem{sep: true},
-		menuItem{label: "Insert above", key: "a", act: a(actInsertAbove)},
-		menuItem{label: "Insert below", key: "b", act: a(actInsertBelow)},
+		menuItem{label: "Insert above", key: m.keys.InsertAbove.Help().Key, act: a(actInsertAbove)},
+		menuItem{label: "Insert below", key: m.keys.InsertBelow.Help().Key, act: a(actInsertBelow)},
 		menuItem{label: "Duplicate", act: a(actDuplicate)},
 		menuItem{sep: true},
-		menuItem{label: "Cut cell", key: "x", act: a(actCutCell)},
-		menuItem{label: "Copy cell", key: "c", act: a(actCopyCell)},
+		menuItem{label: label("Cut"), key: m.keys.Cut.Help().Key, act: a(actCutCell)},
+		menuItem{label: label("Copy"), key: m.keys.Copy.Help().Key, act: a(actCopyCell)},
 	)
-	if m.clipboard != nil {
-		items = append(items, menuItem{label: "Paste cell below", key: "v", act: a(actPasteCell)})
+	if len(m.clipboard) > 0 {
+		items = append(items, menuItem{label: "Paste cell below", key: m.keys.Paste.Help().Key, act: a(actPasteCell)})
 	}
 	items = append(items,
-		menuItem{label: "Move up", key: "K", act: a(actMoveUp)},
-		menuItem{label: "Move down", key: "J", act: a(actMoveDown)},
+		menuItem{label: mergeLabel, key: m.keys.Merge.Help().Key, act: a(actMergeCells)},
+		menuItem{label: label("Move up"), key: m.keys.MoveUp.Help().Key, act: a(actMoveUp)},
+		menuItem{label: label("Move down"), key: m.keys.MoveDown.Help().Key, act: a(actMoveDown)},
 		menuItem{sep: true})
 	if c.kind == notebook.Code {
-		items = append(items, menuItem{label: "Convert to markdown", key: "m", act: a(actToMarkdown)})
-		if len(c.outputs) > 0 {
-			items = append(items,
-				menuItem{label: "Copy output", act: a(actCopyOutput)},
-				menuItem{label: "Clear output", key: "O", act: a(actClearOutput)})
+		label := "Hide input"
+		if c.inputHidden() {
+			label = "Show input"
 		}
-	} else {
-		items = append(items, menuItem{label: "Convert to code", key: "y", act: a(actToCode)})
+		items = append(items, menuItem{label: label, key: m.keys.ToggleInput.Help().Key, act: a(actToggleInput)})
+		if c.hasTextOutput() {
+			label := "Don't wrap output"
+			if c.noWrap {
+				label = "Wrap output"
+			}
+			items = append(items, menuItem{label: label, key: m.keys.ScrollRight.Help().Key, act: a(actToggleWrap)})
+		}
+		if len(c.outputs) > 0 || m.multiSelected() {
+			items = append(items,
+				menuItem{label: "Copy output", key: m.keys.CopyOutput.Help().Key, act: a(actCopyOutput)},
+				menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
+		}
 	}
+	if c.kind != notebook.Code {
+		items = append(items, menuItem{label: "Convert to code", key: m.keys.ToCode.Help().Key, act: a(actToCode)})
+	}
+	if c.kind != notebook.Markdown {
+		items = append(items, menuItem{label: "Convert to markdown", key: m.keys.ToMarkdown.Help().Key, act: a(actToMarkdown)})
+	}
+	if c.kind != notebook.Raw {
+		items = append(items, menuItem{label: "Convert to raw", key: m.keys.ToRaw.Help().Key, act: a(actToRaw)})
+	}
+	if c.kind == notebook.Raw {
+		label := "Hide input"
+		if c.inputHidden() {
+			label = "Show input"
+		}
+		items = append(items, menuItem{label: label, key: m.keys.ToggleInput.Help().Key, act: a(actToggleInput)})
+	}
+	items = append(items, menuItem{label: "Edit in $EDITOR", key: m.keys.ExtEdit.Help().Key, act: a(actExtEdit)})
 	if m.hasOutputs() {
-		items = append(items, menuItem{label: "Clear all outputs", key: "D", act: a(actClearAllOutput)})
+		items = append(items, menuItem{label: "Clear all outputs", key: m.keys.ClearAllOutput.Help().Key, act: a(actClearAllOutput)})
 	}
 	items = append(items,
+		menuItem{label: "Restart & clear outputs", key: m.keys.RestartClear.Help().Key, act: a(actRestartClear)},
+		menuItem{label: "Save as…", key: m.keys.SaveAs.Help().Key, act: a(actSaveAs)})
+	items = append(items,
 		menuItem{sep: true},
-		menuItem{label: "Delete cell", key: "dd", act: a(actDeleteCell), danger: true})
+		menuItem{label: label("Delete"), key: m.keys.Delete.Help().Key, act: a(actDeleteCell), danger: true})
 
 	m.menu = menuState{items: items, x: x, y: y}
 	m.menu.idx = -1
@@ -581,15 +687,13 @@ func synthKey(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: s}
 }
 
-// commandKey runs a command-mode key binding against a given cell, so that
-// mouse actions behave exactly like their keyboard equivalents.
-func (m *Model) commandKey(cell int, k string) tea.Cmd {
-	if cell >= 0 && cell < len(m.cells) {
-		m.sel = cell
-	}
+// commandKey runs a named command against a cell, regardless of its keys.
+// Mouse actions must keep working even when their command is unbound.
+func (m *Model) commandKey(cell int, name string) tea.Cmd {
+	m.focusCell(cell)
 	m.leaveEdit()
 	m.pendingKey = ""
-	return m.handleCommandKey(synthKey(k))
+	return m.runCommand(name, true)
 }
 
 // doAction executes a clickable action.
@@ -603,6 +707,12 @@ func (m *Model) doAction(a action) tea.Cmd {
 	}
 	validCell := a.cell >= 0 && a.cell < len(m.cells)
 	switch a.kind {
+	case actToggleSidebar:
+		return m.toggleSidebar()
+	case actSidebarPanel:
+		m.setSidePanel(sidePanel(a.cell))
+	case actSidebarItem:
+		m.jumpToCell(a.cell)
 	case actRunSelected:
 		return m.runSelected(false, false)
 	case actFocusStdin:
@@ -625,6 +735,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.restart()
 	case actClearAllOutput:
 		return m.clearAllOutputs()
+	case actRestartClear:
+		return m.restartAndClear()
+	case actSaveAs:
+		return m.openSaveAs()
 	case actSave:
 		return m.saveCmd()
 	case actHelp:
@@ -633,6 +747,8 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.openThemePicker()
 	case actThemeItem:
 		return m.confirmTheme(a.cell)
+	case actPaletteItem:
+		return m.runPalette(a.cell)
 	case actModelItem:
 		return m.choosePicker(a.cell)
 	case actToggleMode:
@@ -644,7 +760,7 @@ func (m *Model) doAction(a action) tea.Cmd {
 
 	case actRunCell:
 		if validCell {
-			m.sel = a.cell
+			m.focusCell(a.cell)
 			return m.runSelected(false, false)
 		}
 	case actEditCell:
@@ -654,31 +770,59 @@ func (m *Model) doAction(a action) tea.Cmd {
 			m.enterEdit()
 		}
 	case actInsertAbove:
-		return m.commandKey(a.cell, "a")
+		return m.commandKey(a.cell, "insert_above")
 	case actInsertBelow:
-		return m.commandKey(a.cell, "b")
+		return m.commandKey(a.cell, "insert_below")
 	case actCutCell:
-		return m.commandKey(a.cell, "x")
+		return m.commandKey(a.cell, "cut")
 	case actCopyCell:
-		return m.commandKey(a.cell, "c")
+		return m.commandKey(a.cell, "copy")
 	case actPasteCell:
-		return m.commandKey(a.cell, "v")
+		return m.commandKey(a.cell, "paste")
 	case actMoveUp:
-		return m.commandKey(a.cell, "K")
+		return m.commandKey(a.cell, "move_up")
 	case actMoveDown:
-		return m.commandKey(a.cell, "J")
-	case actToMarkdown, actToCode:
+		return m.commandKey(a.cell, "move_down")
+	case actToMarkdown:
+		return m.commandKey(a.cell, "to_markdown")
+	case actToCode:
+		return m.commandKey(a.cell, "to_code")
+	case actMergeCells:
+		return m.commandKey(a.cell, "merge")
+	case actSplitCell:
+		return m.splitCell(a.cell)
+	case actToRaw:
 		if validCell {
-			m.convertCell(a.cell, a.kind == actToCode)
+			m.convertCell(a.cell, notebook.Raw)
+		}
+	case actToggleInput:
+		if validCell {
+			c := m.cells[a.cell]
+			if c.kind == notebook.Markdown {
+				return m.setStatus(statusInfo, "markdown cells have no input to hide")
+			}
+			c.setInputHidden(!c.inputHidden())
+			m.dirty = true
+			if c.inputHidden() {
+				m.leaveEdit()
+			}
+		}
+	case actScrollOutLeft, actScrollOutRight, actToggleWrap:
+		if validCell {
+			return m.scrollOutput(a.cell, a.kind)
+		}
+	case actExtEdit:
+		if validCell {
+			return m.startExternalEdit(a.cell)
 		}
 	case actClearOutput:
-		return m.commandKey(a.cell, "O")
+		return m.commandKey(a.cell, "clear_output")
 	case actFixCell:
-		return m.commandKey(a.cell, "f")
+		return m.commandKey(a.cell, "fix")
 	case actFormatCell:
 		return m.formatCell(a.cell)
 	case actAskCell:
-		return m.commandKey(a.cell, "e")
+		return m.commandKey(a.cell, "ask")
 	case actAskSend:
 		return m.sendAsk()
 	case actReviewApply:
@@ -693,17 +837,17 @@ func (m *Model) doAction(a action) tea.Cmd {
 		if validCell {
 			m.cells = append(m.cells[:a.cell+1], append([]*Cell{m.cells[a.cell].clone()}, m.cells[a.cell+1:]...)...)
 			m.sel = a.cell + 1
+			m.collapse()
 			m.dirty = true
 			m.leaveEdit()
 		}
 	case actDeleteCell:
-		if validCell {
-			m.leaveEdit()
-			m.deleteCell(a.cell)
-			return m.setStatus(statusInfo, "cell deleted · z to undo")
-		}
+		return m.commandKey(a.cell, "delete")
 	case actCopyOutput:
 		if validCell {
+			if len(m.cells[a.cell].outputs) == 0 {
+				return m.setStatus(statusInfo, "no output to copy")
+			}
 			text := plainOutput(m.cells[a.cell])
 			m.textClip = text
 			return tea.Batch(tea.SetClipboard(text), m.setStatus(statusSuccess, "output copied to clipboard"))

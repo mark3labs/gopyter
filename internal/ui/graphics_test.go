@@ -68,7 +68,7 @@ func TestKittyFreesClearedImages(t *testing.T) {
 				c.outputs = nil
 				c.outRev++
 			case "convert":
-				m.convertCell(0, false)
+				m.convertCell(0, notebook.Markdown)
 			case "delete":
 				m.deleteCell(0)
 			case "reload":
@@ -89,6 +89,35 @@ func TestKittyFreesClearedImages(t *testing.T) {
 			}
 			if name == "replace" && !strings.Contains(got, "a=t,") {
 				t.Fatal("replacement not sent")
+			}
+		})
+	}
+}
+
+func TestKittyCellUndoKeepsImages(t *testing.T) {
+	for _, op := range []string{"delete", "merge"} {
+		t.Run(op, func(t *testing.T) {
+			m := imageModel(t)
+			m.cells = append(m.cells, newCell(notebook.Code, "next"))
+			m.View()
+			m.gfx.Flush()
+			m.mode = modeCommand
+			if op == "delete" {
+				m.deleteCells(0, 1)
+			} else {
+				m.mergeCells()
+			}
+			m.View()
+			if got := m.gfx.Flush(); got != "" {
+				t.Fatalf("undoable %s freed images: %q", op, got)
+			}
+			m.undoCells()
+			m.View()
+			if got := m.gfx.Flush(); got != "" {
+				t.Fatalf("undo %s resent images: %q", op, got)
+			}
+			if !strings.Contains(m.View().Content, string(termimg.Placeholder)) {
+				t.Fatal("undo did not restore image")
 			}
 		})
 	}

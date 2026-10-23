@@ -26,13 +26,14 @@ gopyter --version || curl -fsSL https://raw.githubusercontent.com/mark3labs/gopy
 go version            # required: cells are built with the Go toolchain on PATH
 ```
 
-`gopls` is optional. It's only used for completion in the TUI.
+`gopls` is optional. It's only used for completion, symbol info and live diagnostics in the TUI.
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
 | `gopyter [file.ipynb]` | open (or create) a notebook in the TUI |
+| `gopyter serve dir --authorized-keys file` | serve the human TUI over SSH to trusted key holders (arbitrary code as the server user); agents should keep using `gopyter run` |
 | `gopyter run file.ipynb` | run every code cell in order and print the outputs |
 | `gopyter run file.ipynb --save` | also write outputs and execution counts into the file |
 | `gopyter run file.ipynb --fail-fast` | stop at the first failing cell |
@@ -239,9 +240,23 @@ changes, gopyter asks them which version to keep.
 
 ## TUI quick reference (for telling users)
 
+These are the default keys. Users can rebind commands in config.json;
+check `gopyter keys` for their current bindings before giving key instructions.
+
 `enter`/`esc` switch between edit and command mode. `ctrl+r` (or
 `shift+enter`) runs the cell and moves to the next one; `A` runs all cells.
+`r` converts to raw (never run), `I` hides/shows code or raw input, `E` edits
+in `$VISUAL`/`$EDITOR`, `C` copies output, `<`/`>` scroll wide text output,
+`alt+r` restarts and clears idle outputs, and `alt+s` opens save-as (the last
+two work in both modes).
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`
 deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`
-picks a theme.
+picks a theme. In command mode, `ctrl+p` or `:` opens a searchable list of
+every available command; `enter` runs the selection and `esc` closes it.
+`ctrl+b` opens a sidebar with a table of contents and the
+kernel's variables (types and values); `tab` switches panels.
+In command mode, `alt+↑/↓` or `shift+click` extends a cell
+selection and `alt+a` selects all; cell commands act on the range. `alt+m`
+merges the range (or with the next cell), `alt+-` splits at the edit cursor,
+and command-mode `z` undoes a delete, merge or split.

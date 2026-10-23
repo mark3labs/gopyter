@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image/color"
 
 	"charm.land/lipgloss/v2"
@@ -10,7 +11,8 @@ import (
 // ones without access to the Model (editor, highlighter, completion popup),
 // shares one source of truth. They are only reassigned by setPalette, which
 // runs on the Bubble Tea goroutine (at startup and from the theme picker),
-// the same goroutine that renders, so they need no locking.
+// the same goroutine that renders, so they need no locking locally. Servers
+// call UseTheme before starting sessions and use FixedTheme for read-only access.
 var (
 	colPrimary  color.Color // selection, focus, links: Go gopher blue by default
 	colInfo     color.Color // results, tooltips
@@ -33,6 +35,17 @@ var (
 )
 
 func init() { setPalette(defaultTheme().palette(true)) }
+
+// UseTheme sets the process-wide palette. Call it once before starting any
+// concurrent Models, all of which must use Options.FixedTheme.
+func UseTheme(name string, dark bool) error {
+	def, ok := lookupTheme(name)
+	if !ok {
+		return fmt.Errorf("unknown theme %q", name)
+	}
+	setPalette(def.palette(dark))
+	return nil
+}
 
 // palette is a resolved set of hex colors a UI theme is built from.
 type palette struct {

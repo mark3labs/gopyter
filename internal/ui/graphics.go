@@ -11,8 +11,11 @@ func (m *Model) imageKeys() []termimg.Key {
 	for _, c := range m.cells {
 		keys = append(keys, c.images...)
 	}
-	for _, t := range m.trash {
-		keys = append(keys, t.cell.images...)
+	for _, u := range m.undo {
+		for _, c := range u.cells {
+			keys = append(keys, c.images...)
+		}
+		keys = append(keys, u.images...)
 	}
 	return keys
 }

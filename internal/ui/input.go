@@ -176,6 +176,7 @@ func (m *Model) focusInput(item string) tea.Cmd {
 	m.closeInfo()
 	if i, _ := m.cellByID(m.running.cellID); i >= 0 {
 		m.sel = i
+		m.collapse()
 	}
 	m.leaveEdit()
 	m.in.focus = item

@@ -48,12 +48,22 @@ func (k *Kernel) CompletionWorkspace() (string, error) {
 	return file, nil
 }
 
+// Segment maps Lines mirror lines starting at Line to cell lines starting at
+// CellLine (all 0-based), at identical byte columns.
+type Segment struct {
+	Line, CellLine, Lines int
+	// Stmt distinguishes statements in main from declarations and imports.
+	Stmt bool
+}
+
 // CompletionSource is a Go file mirroring a cell in the context of the
 // kernel's persisted declarations, for use with gopls.
 type CompletionSource struct {
 	Content string
 	// Line and Col locate the cursor in Content (0-based line, byte column).
 	Line, Col int
+	// Segments include only this cell's chunks, not generated code.
+	Segments []Segment
 }
 
 // lineWriter tracks the current line while building a file.
@@ -155,6 +165,7 @@ func (k *Kernel) CompletionSource(cellID, src string, row, col int, resolve func
 		w.write(strings.Repeat(" ", c.col-1))
 		w.write(src[c.start:c.end])
 		w.write("\n")
+		res.Segments = append(res.Segments, Segment{Line: startLine, CellLine: c.line - 1, Lines: strings.Count(src[c.start:c.end], "\n") + 1, Stmt: !c.decl})
 		if i == cursorChunk {
 			before := src[c.start:off]
 			res.Line = startLine + strings.Count(before, "\n")

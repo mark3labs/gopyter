@@ -255,6 +255,7 @@ func hoistDecisions(cellID string, pc *parsedCell, fset *token.FileSet, main *ty
 				Names:  []string{id.name},
 				Src:    src.String(),
 				Raw:    "var " + id.name + " = " + fn,
+				Tok:    token.VAR,
 				CellID: cellID,
 			})
 		}
@@ -316,6 +317,7 @@ func varDecl(cellID, cellName string, id defIdent, v *types.Var, main *types.Pac
 		Raw:    raw,
 		CellID: cellID,
 		Var:    &VarInfo{Type: key, Imports: imps},
+		Tok:    token.VAR,
 	}
 }
 
@@ -421,7 +423,8 @@ func importable(path string) bool {
 // varsStatus is written by gopyterVarsDone when a program saved the
 // hoisted variables.
 type varsStatus struct {
-	Errors map[string]string `json:"errors"`
+	Errors map[string]string  `json:"errors"`
+	Vars   map[string]VarPeek `json:"vars"`
 }
 
 // afterRun reconciles the hoisted variables with what the program saved.
@@ -433,6 +436,9 @@ func (k *Kernel) afterRun(cellID string, emit func(Event)) {
 	saved := err == nil && json.Unmarshal(b, &st) == nil
 
 	k.mu.Lock()
+	if saved {
+		k.peeks = st.Vars
+	}
 	var lost, reset, notes []string
 	decls := k.decls[:0:0]
 	for _, d := range k.decls {

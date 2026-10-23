@@ -6,6 +6,9 @@ import (
 )
 
 type keyMap struct {
+	RestartClear, SaveAs                                             key.Binding
+	ToRaw, ToggleInput, ScrollLeft, ScrollRight, ExtEdit, CopyOutput key.Binding
+
 	// Both modes
 	RunAdvance key.Binding
 	Run        key.Binding
@@ -15,34 +18,38 @@ type keyMap struct {
 	Input      key.Binding // focus the running program's input
 
 	// Command mode
-	Up, Down       key.Binding
-	Top, Bottom    key.Binding
-	PageUp         key.Binding
-	PageDown       key.Binding
-	Edit           key.Binding
-	InsertAbove    key.Binding
-	InsertBelow    key.Binding
-	Delete         key.Binding
-	Undelete       key.Binding
-	Cut            key.Binding
-	Copy           key.Binding
-	Paste          key.Binding
-	MoveUp         key.Binding
-	MoveDown       key.Binding
-	ToMarkdown     key.Binding
-	ToCode         key.Binding
-	ToggleOutput   key.Binding
-	ClearOutput    key.Binding
-	ClearAllOutput key.Binding
-	RunAll         key.Binding
-	Restart        key.Binding
-	Help           key.Binding
-	Theme          key.Binding
-	ToggleVim      key.Binding
-	Fix            key.Binding
-	Ask            key.Binding
-	AIModel        key.Binding
-	Quit           key.Binding
+	Sidebar                 key.Binding
+	ExtendUp, ExtendDown    key.Binding
+	SelectAll, Merge, Split key.Binding
+	Up, Down                key.Binding
+	Top, Bottom             key.Binding
+	PageUp                  key.Binding
+	PageDown                key.Binding
+	Edit                    key.Binding
+	InsertAbove             key.Binding
+	InsertBelow             key.Binding
+	Delete                  key.Binding
+	Undelete                key.Binding
+	Cut                     key.Binding
+	Copy                    key.Binding
+	Paste                   key.Binding
+	MoveUp                  key.Binding
+	MoveDown                key.Binding
+	ToMarkdown              key.Binding
+	ToCode                  key.Binding
+	ToggleOutput            key.Binding
+	ClearOutput             key.Binding
+	ClearAllOutput          key.Binding
+	RunAll                  key.Binding
+	Restart                 key.Binding
+	Help                    key.Binding
+	Theme                   key.Binding
+	ToggleVim               key.Binding
+	Fix                     key.Binding
+	Ask                     key.Binding
+	AIModel                 key.Binding
+	Palette                 key.Binding
+	Quit                    key.Binding
 
 	// Edit mode
 	Escape key.Binding
@@ -56,14 +63,27 @@ func newKeyMap() keyMap {
 		return key.NewBinding(key.WithKeys(keys...), key.WithHelp(k, desc))
 	}
 	return keyMap{
-		RunAdvance: b([]string{"shift+enter", "ctrl+r"}, "⇧↵/^r", "run & next"),
-		Run:        b([]string{"ctrl+enter", "ctrl+j"}, "^↵", "run"),
-		RunInsert:  b([]string{"alt+enter"}, "alt+↵", "run & insert"),
-		Save:       b([]string{"ctrl+s"}, "^s", "save"),
-		Interrupt:  b([]string{"ctrl+c"}, "^c", "interrupt"),
-		Input:      b([]string{"alt+i"}, "alt+i", "input line"),
+		ToRaw:        b([]string{"r"}, "r", "to raw"),
+		ToggleInput:  b([]string{"I"}, "I", "hide/show input"),
+		ScrollLeft:   b([]string{"<"}, "<", "scroll output left"),
+		ScrollRight:  b([]string{">"}, ">", "scroll output right"),
+		ExtEdit:      b([]string{"E"}, "E", "edit in $EDITOR"),
+		CopyOutput:   b([]string{"C"}, "C", "copy output"),
+		RestartClear: b([]string{"alt+r"}, "alt+r", "restart & clear"),
+		SaveAs:       b([]string{"alt+s"}, "alt+s", "save as…"),
+		RunAdvance:   b([]string{"shift+enter", "ctrl+r"}, "⇧↵/^r", "run & next"),
+		Run:          b([]string{"ctrl+enter", "ctrl+j"}, "^↵", "run"),
+		RunInsert:    b([]string{"alt+enter"}, "alt+↵", "run & insert"),
+		Save:         b([]string{"ctrl+s"}, "^s", "save"),
+		Interrupt:    b([]string{"ctrl+c"}, "^c", "interrupt"),
+		Input:        b([]string{"alt+i"}, "alt+i", "input line"),
 		// Widgets: enter on the running cell focuses them, ⇥ moves.
 
+		ExtendUp:       b([]string{"alt+up"}, "alt+↑/↓", "extend selection"),
+		ExtendDown:     b([]string{"alt+down"}, "alt+↓", "extend selection down"),
+		SelectAll:      b([]string{"alt+a"}, "alt+a", "select all cells"),
+		Merge:          b([]string{"alt+m"}, "alt+m", "merge cells"),
+		Split:          b([]string{"alt+-"}, "alt+-", "split cell (editing)"),
 		Up:             b([]string{"up", "k"}, "↑/k", "up"),
 		Down:           b([]string{"down", "j"}, "↓/j", "down"),
 		Top:            b([]string{"g", "home"}, "g", "first cell"),
@@ -74,7 +94,7 @@ func newKeyMap() keyMap {
 		InsertAbove:    b([]string{"a"}, "a", "insert above"),
 		InsertBelow:    b([]string{"b"}, "b", "insert below"),
 		Delete:         b([]string{"d"}, "dd", "delete"),
-		Undelete:       b([]string{"z", "u"}, "z", "undo delete"),
+		Undelete:       b([]string{"z", "u"}, "z", "undo delete/merge/split"),
 		Cut:            b([]string{"x"}, "x", "cut"),
 		Copy:           b([]string{"c"}, "c", "copy"),
 		Paste:          b([]string{"v", "p"}, "v", "paste below"),
@@ -88,11 +108,13 @@ func newKeyMap() keyMap {
 		RunAll:         b([]string{"A"}, "A", "run all"),
 		Restart:        b([]string{"R"}, "R", "restart kernel"),
 		Help:           b([]string{"?"}, "?", "help"),
+		Sidebar:        b([]string{"ctrl+b"}, "^b", "sidebar"),
 		Theme:          b([]string{"T"}, "T", "color theme"),
 		ToggleVim:      b([]string{"V"}, "V", "vim keys on/off"),
 		Fix:            b([]string{"f"}, "f", "AI fix error"),
 		Ask:            b([]string{"e"}, "e", "ask AI to edit"),
 		AIModel:        b([]string{"M"}, "M", "AI model / on-off"),
+		Palette:        b([]string{"ctrl+p", ":"}, "^p/:", "command palette"),
 		Quit:           b([]string{"q"}, "q", "quit"),
 
 		Escape: b([]string{"esc"}, "esc", "command mode"),
@@ -125,9 +147,21 @@ func (k keyMap) editShort() []key.Binding {
 	return []key.Binding{k.Escape, k.RunAdvance, k.Run, k.RunInsert, k.Undo, k.Save}
 }
 
+func (k keyMap) sidebarShort() []key.Binding {
+	return []key.Binding{hint("↑↓", "move"), hint("↵", "jump"), hint("⇥", "panel"), hint("esc", "notebook"), k.Sidebar}
+}
+
 type helpSection struct {
 	title string
 	keys  []key.Binding
+}
+
+// withKey appends a configured help key, omitting it for unbound commands.
+func withKey(desc string, b key.Binding) string {
+	if !b.Enabled() {
+		return desc
+	}
+	return desc + " · " + b.Help().Key
 }
 
 // hint is a help-only binding.
@@ -164,7 +198,7 @@ func (k keyMap) vimVisualShort() []key.Binding {
 
 // fullHelp returns the help overlay sections; vim adds its own. The AI
 // section needs AI support (aiAvailable); its fix keys only show while AI
-// is on. The help overlay is the one place that mentions AI while it's off.
+// is on. Help and the command palette may mention the model picker while AI is off.
 func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 	secs := k.baseHelp()
 	if aiAvailable {
@@ -188,20 +222,32 @@ func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 			hint("K", "symbol info"),
 		}})
 	}
+	for i := range secs {
+		var enabled []key.Binding
+		for _, b := range secs[i].keys {
+			if b.Enabled() {
+				enabled = append(enabled, b)
+			}
+		}
+		secs[i].keys = enabled
+	}
 	return secs
 }
 
 func (k keyMap) baseHelp() []helpSection {
+	widgets := k.Edit
+	widgets.SetHelp(k.Edit.Help().Key, "use widgets")
 	return []helpSection{
 		// The widget keys (←/→, ⇥...) are in the footer while one has the
 		// focus.
 		{"Running", []key.Binding{
-			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart,
-			hint("↵", "use widgets"), k.Input, hint("^d", "done (input)"),
+			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart, k.RestartClear,
+			widgets, k.Input, hint("^d", "done (input)"),
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
-		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
-		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},
+		{"Cells", []key.Binding{k.ExtendUp, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
+		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Sidebar, k.Theme, k.ToggleVim, k.Palette, k.Help, k.Quit}},
+		{"Cell", []key.Binding{k.ToRaw, k.ToggleInput, k.ScrollLeft, k.ScrollRight, k.ExtEdit, k.CopyOutput}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
 			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "format Go code")),
