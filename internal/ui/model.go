@@ -8,6 +8,7 @@ import (
 	"image"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -76,6 +77,15 @@ type cellLayout struct {
 
 // Options configure the notebook UI.
 type Options struct {
+	// Terminal overrides the process terminal (for example, an SSH PTY).
+	Terminal []tea.ProgramOption
+	// FixedTheme means UseTheme set the palette before any models started.
+	// The picker is disabled and New only builds model-local styles.
+	FixedTheme bool
+	// ResolvePath validates and maps save-as paths. Nil uses paths as typed.
+	ResolvePath func(string) (string, error)
+	// Notice is shown when the notebook opens.
+	Notice string
 	// Keys replaces the defaults for named commands from config.json.
 	Keys     map[string][]string
 	Path     string
@@ -106,21 +116,22 @@ type Model struct {
 	extEdit struct{ cellID, path, orig string }
 	k       *kernel.Kernel
 
-	completer Completer
-	comp      completionState
-	info      infoState
-	ai        *AIConfig // nil: no AI support at all
-	aiModel   string    // selected model, kept while AI is off
-	assistant Assistant // nil while AI is off
-	task      aiTask    // an AI fix or edit: in flight, then awaiting review
-	ask       askState
-	picker    modelPicker
-	vim       vimState
-	path      string
-	meta      map[string]any
-	cells     []*Cell
-	sel       int
-	mode      mode
+	completer   Completer
+	comp        completionState
+	info        infoState
+	ai          *AIConfig // nil: no AI support at all
+	aiModel     string    // selected model, kept while AI is off
+	assistant   Assistant // nil while AI is off
+	task        aiTask    // an AI fix or edit: in flight, then awaiting review
+	ask         askState
+	picker      modelPicker
+	vim         vimState
+	path        string
+	resolvePath func(string) (string, error)
+	meta        map[string]any
+	cells       []*Cell
+	sel         int
+	mode        mode
 
 	width, height int
 	offset        int
@@ -202,6 +213,9 @@ func New(opts Options) *Model {
 			m.assistant = cfg.New(cfg.Model)
 		}
 	}
+	m.resolvePath = opts.ResolvePath
+	m.status = opts.Notice
+	m.themes.fixed = opts.FixedTheme
 	m.themes.dark = !opts.LightBackground
 	m.themes.syntax = opts.SyntaxTheme
 	m.themes.save = opts.SaveTheme
@@ -1192,8 +1206,9 @@ func (m *Model) quit() tea.Cmd {
 	return tea.Quit
 }
 
-// Run starts the TUI.
-func Run(ctx context.Context, opts Options) error {
+// NewProgram builds a TUI for a terminal. The caller must call cleanup after
+// Run returns, before closing the completion engine and kernel.
+func NewProgram(ctx context.Context, opts Options) (*tea.Program, func()) {
 	m := New(opts)
 	if wd, err := os.Getwd(); err == nil && opts.Kernel.RunDir == "" {
 		opts.Kernel.RunDir = wd
@@ -1203,7 +1218,27 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 	}
-	_, err := tea.NewProgram(m, tea.WithContext(ctx), tea.WithFilter(m.filter)).Run()
+	terminal := append(slices.Clone(opts.Terminal), tea.WithContext(ctx), tea.WithFilter(m.filter))
+	return tea.NewProgram(m, terminal...), m.shutdown
+}
+
+// shutdown runs after Bubble Tea stops; drain the cell before closing its kernel.
+func (m *Model) shutdown() {
+	if m.task.active {
+		m.task.cancel()
+	}
+	if rs := m.running; rs != nil {
+		rs.cancel()
+		for range rs.ch {
+		}
+	}
+}
+
+// Run starts the TUI and cancels pending work before returning.
+func Run(ctx context.Context, opts Options) error {
+	p, cleanup := NewProgram(ctx, opts)
+	defer cleanup()
+	_, err := p.Run()
 	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 		return nil
 	}

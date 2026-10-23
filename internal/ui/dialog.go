@@ -223,6 +223,14 @@ func (m *Model) saveAsConfirm() tea.Cmd {
 	if filepath.Ext(p) == "" {
 		p += ".ipynb"
 	}
+	if m.resolvePath != nil {
+		resolved, err := m.resolvePath(p)
+		if err != nil {
+			m.setDialogFocus(focusInput)
+			return m.setStatus(statusError, "%v", err)
+		}
+		p = resolved
+	}
 	oldPath := m.path
 	m.path = p
 	m.overlay = overlayNone
