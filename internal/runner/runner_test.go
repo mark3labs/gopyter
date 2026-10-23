@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
@@ -147,5 +148,61 @@ func TestBlocksRedrawOnTerminal(t *testing.T) {
 	want := "one\ntwo\n\x1b[2A\r\x1b[Jthree\nfour\nhtml\nfive\n"
 	if got := out.String(); got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBlocksNoRedraw(t *testing.T) {
+	var out bytes.Buffer
+	b := newBlocks(&out, false)
+	b.show("id:p", "old", true, true)
+	b.show("id:p", "one\ntwo", true, true)
+	if out.Len() != 0 {
+		t.Fatal(out.String())
+	}
+	b.finish()
+	if out.String() != "one\ntwo\n" {
+		t.Fatal(out.String())
+	}
+}
+
+func TestRunCellWithoutRedraw(t *testing.T) {
+	k, err := kernel.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := k.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	c := &notebook.Cell{ID: "cell", Type: notebook.Code, Source: `for i := range 3 { nb.DisplayID("p", i) }`}
+	var out bytes.Buffer
+	if err := RunCell(t.Context(), k, c, 7, &out, nil, Options{Images: true}); err != nil {
+		t.Fatal(err)
+	}
+	if out.String() != "=> 2\n" || c.ExecutionCount != 7 {
+		t.Fatalf("%q, count %d", out.String(), c.ExecutionCount)
+	}
+}
+
+func TestRunCellWidth(t *testing.T) {
+	k, err := kernel.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := k.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	c := &notebook.Cell{ID: "cell", Type: notebook.Code, Source: `nb.DisplayMarkdown("` + strings.Repeat("word ", 30) + `")`}
+	var out bytes.Buffer
+	if err := RunCell(t.Context(), k, c, 1, &out, nil, Options{Width: 40}); err != nil {
+		t.Fatal(err)
+	}
+	for line := range strings.SplitSeq(out.String(), "\n") {
+		if ansi.StringWidth(line) > 40 {
+			t.Fatalf("too wide: %q", line)
+		}
 	}
 }

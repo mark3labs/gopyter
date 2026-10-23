@@ -7,11 +7,13 @@ description: Create, edit, run and validate Go notebooks (.ipynb) with gopyter, 
 
 gopyter is a Jupyter-style notebook for **Go**. It stores notebooks as standard
 `.ipynb` files (nbformat v4) with a [GoNB](https://github.com/janpfeifer/gonb)
-kernelspec. Each cell is compiled with the real Go toolchain. It has two
+kernelspec. Each cell is compiled with the real Go toolchain. It has three
 entry points:
 
 - `gopyter notes.ipynb`: the interactive terminal UI, for humans.
 - `gopyter run notes.ipynb`: headless execution, for agents, scripts and CI.
+- `gopyter console`: an inline REPL on the same kernel. Agents should use line
+  mode (`gopyter console < snippet.go`), not the interactive prompt.
 
 **As an agent, write the `.ipynb` JSON directly and check it with
 `gopyter run`.** The TUI needs an interactive terminal. Open it only if the
@@ -33,6 +35,8 @@ go version            # required: cells are built with the Go toolchain on PATH
 | Command | Purpose |
 |---|---|
 | `gopyter [file.ipynb]` | open (or create) a notebook in the TUI |
+| `gopyter console` | inline Go REPL; scripts and agents use `gopyter console < snippet.go` |
+| `gopyter console --save file.ipynb` | save executed inputs and outputs as a notebook on exit (overwrites) |
 | `gopyter serve dir --authorized-keys file` | serve the human TUI over SSH to trusted key holders (arbitrary code as the server user); agents should keep using `gopyter run` |
 | `gopyter run file.ipynb` | run every code cell in order and print the outputs |
 | `gopyter run file.ipynb --save` | also write outputs and execution counts into the file |

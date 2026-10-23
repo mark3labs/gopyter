@@ -24,7 +24,8 @@ type blocks struct {
 	lastImages  []termimg.Key
 	blockImages map[string][]termimg.Key
 	w           io.Writer
-	tty         bool
+	redraw      bool
+	opts        Options
 
 	lastKey   string // the block printed last, if nothing followed it
 	lastLines int
@@ -33,8 +34,8 @@ type blocks struct {
 	pending map[string]string
 }
 
-func newBlocks(w io.Writer, tty bool) *blocks {
-	return &blocks{w: w, tty: tty, pending: map[string]string{}}
+func newBlocks(w io.Writer, redraw bool) *blocks {
+	return &blocks{w: w, redraw: redraw, opts: Options{Images: redraw}, pending: map[string]string{}}
 }
 
 // outputKey identifies output i of outs across updates.
@@ -52,7 +53,11 @@ func (b *blocks) showOutput(key string, o notebook.Output, updatable, event bool
 	if b.gfx != nil {
 		d = b.gfx.Track(&keys)
 	}
-	text := renderOutput(o, b.tty, d)
+	opts := b.opts
+	if opts.Width <= 0 {
+		opts.Width = 100
+	}
+	text := renderOutput(o, opts, d)
 	if b.blockImages == nil {
 		b.blockImages = make(map[string][]termimg.Key)
 	}
@@ -64,14 +69,14 @@ func (b *blocks) showOutput(key string, o notebook.Output, updatable, event bool
 // false for changes made by DOM operations.
 func (b *blocks) show(key, text string, updatable, event bool) {
 	switch {
-	case b.tty && key == b.lastKey:
+	case b.redraw && key == b.lastKey:
 		if b.lastLines > 0 {
 			// Raw: lipgloss would strip it when the terminal was only
 			// detected through the environment (e.g. CLICOLOR_FORCE).
 			_, _ = fmt.Fprintf(b.w, "\x1b[%dA\r\x1b[J", b.lastLines) // output is best-effort
 		}
 		b.print(key, text)
-	case !event, !b.tty && updatable:
+	case !event, !b.redraw && updatable:
 		if _, ok := b.pending[key]; !ok {
 			b.order = append(b.order, key)
 		}
@@ -123,16 +128,16 @@ func (b *blocks) finish() {
 }
 
 // renderOutput draws a rich output.
-func renderOutput(o notebook.Output, tty bool, d termimg.Drawer) string {
+func renderOutput(o notebook.Output, opts Options, d termimg.Drawer) string {
 	switch o.Kind {
 	case notebook.Result:
 		return paint(resultStyle, "=> "+o.Text)
 	case notebook.MarkdownOut:
-		return renderMarkdown(o.Text)
+		return renderMarkdown(o.Text, opts.Width)
 	case notebook.ImageOut:
-		return renderImage(o.Text, tty, d)
+		return renderImage(o.Text, opts.Images, opts.Width, d)
 	case notebook.HTMLOut:
-		return renderHTML(o.Text, tty, d)
+		return renderHTML(o.Text, opts.Images, opts.Width, d)
 	}
 	return o.Text
 }

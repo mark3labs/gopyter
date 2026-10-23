@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/term"
 	"github.com/mark3labs/gopyter/internal/complete"
 	"github.com/mark3labs/gopyter/internal/config"
+	"github.com/mark3labs/gopyter/internal/console"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/runner"
@@ -78,7 +79,8 @@ func rootCmd() *cobra.Command {
 			"cell commands and widgets.",
 		Example: "  # start a new notebook\n  gopyter\n\n" +
 			"  # open (or create) a notebook\n  gopyter analysis.ipynb\n\n" +
-			"  # execute a notebook headlessly and store the outputs\n  gopyter run analysis.ipynb --save",
+			"  # execute a notebook headlessly and store the outputs\n  gopyter run analysis.ipynb --save\n\n" +
+			"  # start an inline Go REPL\n  gopyter console",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := ""
@@ -127,7 +129,38 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd(), keysCmd(), serveCmd(&workdir))
+	cmd.AddCommand(consoleCmd(&workdir), runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd(), keysCmd(), serveCmd(&workdir))
+	return cmd
+}
+
+func consoleCmd(workdir *string) *cobra.Command {
+	var save string
+	var noComplete bool
+	cmd := &cobra.Command{
+		Use: "console", Short: "Run Go interactively on a notebook kernel", Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			k, err := kernel.New(*workdir)
+			if err != nil {
+				return err
+			}
+			defer closeKernel(k)
+			if dir, err := os.Getwd(); err == nil {
+				k.RunDir = dir
+			}
+			opts := console.Options{Kernel: k, SavePath: save}
+			if path, err := config.HistoryPath(); err == nil {
+				opts.HistoryPath = path
+			}
+			if f, ok := cmd.InOrStdin().(*os.File); !noComplete && ok && term.IsTerminal(f.Fd()) {
+				engine := complete.New(k)
+				defer func() { _ = engine.Close() }() // best-effort cleanup, as in the notebook
+				opts.Completer = engine
+			}
+			return console.Run(cmd.Context(), opts, cmd.InOrStdin(), cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().StringVar(&save, "save", "", "write the session to this notebook on exit")
+	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
 	return cmd
 }
 

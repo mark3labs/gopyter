@@ -17,11 +17,12 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go` / `format.go` / `keys.go` / `serve.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`, `gopyter keys`, `gopyter serve`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `main.go` / `format.go` / `keys.go` / `serve.go` | cobra commands (`gopyter`, `gopyter console`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`, `gopyter keys`, `gopyter serve`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
 | `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
 | `internal/notebook` | `.ipynb` (nbformat v4) read/write with a GoNB kernelspec                  |
+| `internal/console`  | `gopyter console`: the REPL; reuses the kernel, completion and the runner's output printing |
 | `internal/serve`    | authenticated SSH notebook sessions, confined paths and per-session TUI lifecycle |
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
