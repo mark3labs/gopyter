@@ -246,4 +246,7 @@ check `gopyter keys` for their current bindings before giving key instructions.
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`
 deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`
-picks a theme.
+picks a theme. In command mode, `alt+↑/↓` or `shift+click` extends a cell
+selection and `alt+a` selects all; cell commands act on the range. `alt+m`
+merges the range (or with the next cell), `alt+-` splits at the edit cursor,
+and command-mode `z` undoes a delete, merge or split.

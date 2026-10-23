@@ -249,7 +249,12 @@ func (m *Model) renderFooter() string {
 		pill = t.btnHover.Render(ansi.Strip(pill))
 	}
 	m.zones = append(m.zones, zone{rect: image.Rect(0, m.height-1, lipgloss.Width(pill), m.height), act: toggle, tip: tip})
-	pos := t.muted.Render(fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells)))
+	position := fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells))
+	if m.multiSelected() {
+		lo, hi := m.selRange()
+		position = fmt.Sprintf("cells %d–%d/%d ", lo+1, hi+1, len(m.cells))
+	}
+	pos := t.muted.Render(position)
 	avail := m.width - lipgloss.Width(pill) - lipgloss.Width(pos) - 5
 
 	var mid string
@@ -443,8 +448,8 @@ func (m *Model) renderMarkdownPanel(src string, boxW int) string {
 func (m *Model) renderCell(i, width int) cellRender {
 	t := m.theme
 	c := m.cells[i]
-	selected := i == m.sel
-	editing := selected && m.mode == modeEdit
+	selected := m.inRange(i)
+	editing := i == m.sel && m.mode == modeEdit
 
 	borderColor := t.borderIdle
 	switch {
@@ -484,7 +489,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 		// The spacer line below a rendered markdown cell hosts its action
 		// buttons when selected or hovered, so the layout never shifts.
 		r.ownSpacer = true
-		if selected || i == m.hoverCell {
+		if i == m.sel || i == m.hoverCell {
 			probe := &lineBuilder{}
 			m.cellActions(probe, i, lipgloss.NewStyle(), true)
 			lb := &lineBuilder{}

@@ -224,6 +224,7 @@ func (m *Model) applyReload(nb *notebook.Notebook, st diskState) tea.Cmd {
 		cells = []*Cell{newCell(notebook.Code, "")}
 	}
 	m.cells = cells
+	m.collapse()
 	m.meta = nb.Metadata
 	if i := slices.Index(cells, cur); i >= 0 {
 		m.sel = i

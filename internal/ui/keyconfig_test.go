@@ -32,7 +32,7 @@ func TestKeyCommandsCoverKeyMap(t *testing.T) {
 }
 
 func TestKeyCommandNamesStable(t *testing.T) {
-	want := strings.Fields("run_advance run run_insert save interrupt input up down top bottom page_up page_down edit insert_above insert_below delete undelete cut copy paste move_up move_down to_markdown to_code toggle_output clear_output clear_all_output run_all restart help theme toggle_vim fix ask ai_model quit escape undo redo info")
+	want := strings.Fields("extend_up extend_down select_all merge split run_advance run run_insert save interrupt input up down top bottom page_up page_down edit insert_above insert_below delete undelete cut copy paste move_up move_down to_markdown to_code toggle_output clear_output clear_all_output run_all restart help theme toggle_vim fix ask ai_model quit escape undo redo info")
 	var got []string
 	for _, c := range keyCommands {
 		got = append(got, c.name)

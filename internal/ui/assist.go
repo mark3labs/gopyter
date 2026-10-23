@@ -174,6 +174,7 @@ func (m *Model) requestEdit(i int) tea.Cmd {
 	if i != m.sel {
 		m.leaveEdit()
 		m.sel = i
+		m.collapse()
 	}
 	if m.ask.cellID != c.id {
 		m.ask = askState{cellID: c.id}
@@ -344,6 +345,7 @@ func (m *Model) applyProposal() tea.Cmd {
 	if i != m.sel {
 		m.leaveEdit()
 		m.sel = i
+		m.collapse()
 	}
 	c.ed.SetValue(p.Source)
 	c.ed.breakUndo()
