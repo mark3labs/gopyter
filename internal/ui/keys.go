@@ -136,6 +136,14 @@ type helpSection struct {
 	keys  []key.Binding
 }
 
+// withKey appends a configured help key, omitting it for unbound commands.
+func withKey(desc string, b key.Binding) string {
+	if !b.Enabled() {
+		return desc
+	}
+	return desc + " · " + b.Help().Key
+}
+
 // hint is a help-only binding.
 func hint(keys, desc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
@@ -194,16 +202,27 @@ func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 			hint("K", "symbol info"),
 		}})
 	}
+	for i := range secs {
+		var enabled []key.Binding
+		for _, b := range secs[i].keys {
+			if b.Enabled() {
+				enabled = append(enabled, b)
+			}
+		}
+		secs[i].keys = enabled
+	}
 	return secs
 }
 
 func (k keyMap) baseHelp() []helpSection {
+	widgets := k.Edit
+	widgets.SetHelp(k.Edit.Help().Key, "use widgets")
 	return []helpSection{
 		// The widget keys (←/→, ⇥...) are in the footer while one has the
 		// focus.
 		{"Running", []key.Binding{
 			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart,
-			hint("↵", "use widgets"), k.Input, hint("^d", "done (input)"),
+			widgets, k.Input, hint("^d", "done (input)"),
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},

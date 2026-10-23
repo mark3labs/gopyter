@@ -76,6 +76,8 @@ type cellLayout struct {
 
 // Options configure the notebook UI.
 type Options struct {
+	// Keys replaces the defaults for named commands from config.json.
+	Keys     map[string][]string
 	Path     string
 	Notebook *notebook.Notebook
 	Kernel   *kernel.Kernel
@@ -134,13 +136,14 @@ type Model struct {
 	runSeq  int
 	in      progInput // the running program's input: stdin and widgets
 
-	spinner  spinner.Model
-	spinning bool
-	help     help.Model
-	keys     keyMap
-	hl       *highlighter
-	theme    theme
-	themes   themeState
+	spinner     spinner.Model
+	spinning    bool
+	help        help.Model
+	keys        keyMap
+	keyWarnings []string
+	hl          *highlighter
+	theme       theme
+	themes      themeState
 	// htmlStyles draw HTML outputs; derived from the theme.
 	htmlStyles htmlview.Styles
 	// md renders markdown outputs and the info popup; mdPanel renders
@@ -189,8 +192,9 @@ func New(opts Options) *Model {
 	}
 	m := &Model{
 		k: opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
-		keys: newKeyMap(), follow: true, hoverCell: -1,
+		follow: true, hoverCell: -1,
 	}
+	m.keys, m.keyWarnings = newKeyMapFrom(opts.Keys)
 	if opts.AI != nil {
 		cfg := *opts.AI
 		m.ai, m.aiModel = &cfg, cfg.Model
@@ -237,7 +241,15 @@ func New(opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	return tea.Batch(tea.RequestWindowSize, watchTick())
+	cmds := []tea.Cmd{tea.RequestWindowSize, watchTick()}
+	if n := len(m.keyWarnings); n > 0 {
+		msg := m.keyWarnings[0]
+		if n > 1 {
+			msg += fmt.Sprintf(" (+%d more · gopyter keys)", n-1)
+		}
+		cmds = append(cmds, m.setStatus(statusError, "keys: %s", msg))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) cur() *Cell { return m.cells[m.sel] }
@@ -463,7 +475,7 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 			return m.cancelTask()
 		}
 		if m.mode == modeEdit {
-			return m.setStatus(statusInfo, "press esc then q to quit")
+			return m.setStatus(statusInfo, "%s", withKey(withKey("command mode", m.keys.Escape)+"; quit", m.keys.Quit))
 		}
 		return m.requestQuit()
 	}
@@ -505,6 +517,27 @@ func (m *Model) handleEditKey(msg tea.KeyPressMsg) tea.Cmd {
 	before := ed.version
 	ks := msg.String()
 
+	// Configurable edit commands take priority over fixed editor keys.
+	switch {
+	case key.Matches(msg, m.keys.Escape):
+		if m.vim.enabled {
+			m.vimEscapeInsert()
+		} else if ed.HasSelection() {
+			ed.ClearSelection()
+		} else {
+			m.leaveEdit()
+		}
+		return nil
+	case key.Matches(msg, m.keys.Undo):
+		ed.Undo()
+		m.dirty = m.dirty || ed.version != before
+		return nil
+	case key.Matches(msg, m.keys.Redo):
+		ed.Redo()
+		m.dirty = m.dirty || ed.version != before
+		return nil
+	}
+
 	// Motions: shift extends the selection, otherwise it's cleared.
 	if base := strings.Replace(ks, "shift+", "", 1); movementKeys[base] {
 		if base != ks {
@@ -526,16 +559,6 @@ func (m *Model) handleEditKey(msg tea.KeyPressMsg) tea.Cmd {
 	}
 
 	switch ks {
-	case "esc":
-		if m.vim.enabled {
-			m.vimEscapeInsert()
-			return nil
-		}
-		if ed.HasSelection() {
-			ed.ClearSelection()
-			return nil
-		}
-		m.leaveEdit()
 	case "enter":
 		ed.Newline()
 	case "backspace", "ctrl+h":
@@ -592,10 +615,6 @@ func (m *Model) handleEditKey(msg tea.KeyPressMsg) tea.Cmd {
 		} else {
 			ed.Dedent()
 		}
-	case "ctrl+z":
-		ed.Undo()
-	case "ctrl+y", "ctrl+shift+z":
-		ed.Redo()
 	default:
 		if msg.Text != "" && msg.Mod&(tea.ModCtrl|tea.ModAlt) == 0 {
 			for _, r := range msg.Text {
@@ -681,106 +700,126 @@ func (m *Model) enterEdit() {
 }
 
 func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
-	k := m.keys
 	pending := m.pendingKey
 	m.pendingKey = ""
+	if name, ok := m.keys.commandFor(msg); ok {
+		repeat := pending == msg.String()
+		if name == "delete" && !repeat {
+			m.pendingKey = msg.String()
+			return nil
+		}
+		return m.runCommand(name, repeat)
+	}
+	if msg.String() == "esc" {
+		return m.cancelTask()
+	}
+	return nil
+}
 
-	switch {
-	case key.Matches(msg, k.Up):
+// runCommand is shared by keyboard lookup and direct mouse actions.
+func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
+	switch name {
+	case "up":
 		m.sel = max(m.sel-1, 0)
-	case key.Matches(msg, k.Down):
+	case "down":
 		m.sel = min(m.sel+1, len(m.cells)-1)
-	case key.Matches(msg, k.Top):
+	case "top":
 		m.sel = 0
-	case key.Matches(msg, k.Bottom):
+	case "bottom":
 		m.sel = len(m.cells) - 1
-	case key.Matches(msg, k.PageUp):
+	case "page_up":
 		m.follow = false
 		m.offset -= m.viewHeight() / 2
-	case key.Matches(msg, k.PageDown):
+	case "page_down":
 		m.follow = false
 		m.offset += m.viewHeight() / 2
-	case key.Matches(msg, k.Edit):
+	case "edit":
 		if len(m.inputItems()) > 0 && m.cur() == m.runningCell() {
 			// The running cell: use its widgets or type its input.
 			return m.focusFirstInput()
 		}
 		m.enterEdit()
-	case key.Matches(msg, k.InsertAbove):
+	case "insert_above":
 		m.insertCell(m.sel, newCell(notebook.Code, ""))
-	case key.Matches(msg, k.InsertBelow):
+	case "insert_below":
 		m.insertCell(m.sel+1, newCell(notebook.Code, ""))
-	case key.Matches(msg, k.Delete):
-		if pending == "d" {
+	case "delete":
+		if repeat {
 			m.deleteCell(m.sel)
-			return m.setStatus(statusInfo, "cell deleted · z to undo")
+			return m.setStatus(statusInfo, "%s", withKey("cell deleted · undo delete", m.keys.Undelete))
 		}
-		m.pendingKey = "d"
-	case key.Matches(msg, k.Undelete):
+
+	case "undelete":
 		if n := len(m.trash); n > 0 {
 			t := m.trash[n-1]
 			m.trash = m.trash[:n-1]
 			m.insertCell(min(t.index, len(m.cells)), t.cell)
 			m.mode = modeCommand
 		}
-	case key.Matches(msg, k.Cut):
+	case "cut":
 		m.clipboard = m.cur().clone()
 		src := m.cur().ed.Value()
 		m.deleteCell(m.sel)
 		return tea.Batch(tea.SetClipboard(src), m.setStatus(statusInfo, "cell cut"))
-	case key.Matches(msg, k.Copy):
+	case "copy":
 		m.clipboard = m.cur().clone()
 		return tea.Batch(tea.SetClipboard(m.cur().ed.Value()), m.setStatus(statusInfo, "cell copied"))
-	case key.Matches(msg, k.Paste):
+	case "paste":
 		if m.clipboard != nil {
 			m.insertCell(m.sel+1, m.clipboard.clone())
 			m.mode = modeCommand
 		}
-	case key.Matches(msg, k.MoveUp):
+	case "move_up":
 		if m.sel > 0 {
 			m.cells[m.sel], m.cells[m.sel-1] = m.cells[m.sel-1], m.cells[m.sel]
 			m.sel--
 			m.dirty = true
 		}
-	case key.Matches(msg, k.MoveDown):
+	case "move_down":
 		if m.sel < len(m.cells)-1 {
 			m.cells[m.sel], m.cells[m.sel+1] = m.cells[m.sel+1], m.cells[m.sel]
 			m.sel++
 			m.dirty = true
 		}
-	case key.Matches(msg, k.ToMarkdown):
+	case "to_markdown":
 		m.convertCell(m.sel, false)
-	case key.Matches(msg, k.ToCode):
+	case "to_code":
 		m.convertCell(m.sel, true)
-	case key.Matches(msg, k.ToggleOutput):
+	case "toggle_output":
 		m.cur().expanded = !m.cur().expanded
-	case key.Matches(msg, k.ClearOutput):
+	case "clear_output":
 		m.clearCellOutput(m.cur())
-	case key.Matches(msg, k.ClearAllOutput):
+	case "clear_all_output":
 		return m.clearAllOutputs()
-	case key.Matches(msg, k.RunAll):
+	case "run_all":
 		return m.runAll()
-	case key.Matches(msg, k.Restart):
+	case "restart":
 		return m.restart()
-	case key.Matches(msg, k.Help):
+	case "help":
 		m.overlay = overlayHelp
-	case key.Matches(msg, k.Theme):
+	case "theme":
 		return m.openThemePicker()
-	case key.Matches(msg, k.ToggleVim):
+	case "toggle_vim":
 		return m.toggleVim()
-	case m.assistant != nil && key.Matches(msg, k.Fix):
+	case "fix":
+		if m.assistant == nil {
+			return nil
+		}
 		return m.requestFix(m.sel)
-	case m.assistant != nil && key.Matches(msg, k.Ask):
+	case "ask":
+		if m.assistant == nil {
+			return nil
+		}
 		return m.requestEdit(m.sel)
-	case m.ai != nil && key.Matches(msg, k.AIModel):
+	case "ai_model":
+		if m.ai == nil {
+			return nil
+		}
 		return m.openModelPicker()
-	case key.Matches(msg, k.Sidebar):
+	case "sidebar":
 		return m.toggleSidebar()
-	case key.Matches(msg, k.Quit):
+	case "quit":
 		return m.requestQuit()
-	case msg.String() == "esc":
-		m.pendingKey = ""
-		return m.cancelTask()
 	}
 	return nil
 }

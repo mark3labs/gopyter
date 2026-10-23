@@ -238,6 +238,9 @@ changes, gopyter asks them which version to keep.
 
 ## TUI quick reference (for telling users)
 
+These are the default keys. Users can rebind commands in config.json;
+check `gopyter keys` for their current bindings before giving key instructions.
+
 `enter`/`esc` switch between edit and command mode. `ctrl+r` (or
 `shift+enter`) runs the cell and moves to the next one; `A` runs all cells.
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`

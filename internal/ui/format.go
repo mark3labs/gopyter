@@ -25,5 +25,5 @@ func (m *Model) formatCell(i int) tea.Cmd {
 	c.ed.breakUndo()
 	m.closeCompletion()
 	m.dirty, m.follow = true, true
-	return m.setStatus(statusSuccess, "Code formatted · ctrl+z while editing to undo")
+	return m.setStatus(statusSuccess, "%s", withKey("Code formatted · undo while editing", m.keys.Undo))
 }

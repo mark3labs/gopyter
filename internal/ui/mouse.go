@@ -537,54 +537,54 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 
 	if c.kind == notebook.Code {
 		if m.running != nil && m.running.cellID == c.id {
-			items = append(items, menuItem{label: "■ Stop", key: "^c", act: a(actInterrupt)})
+			items = append(items, menuItem{label: "■ Stop", key: m.keys.Interrupt.Help().Key, act: a(actInterrupt)})
 		} else {
-			items = append(items, menuItem{label: "▶ Run cell", key: "^↵", act: a(actRunCell)})
+			items = append(items, menuItem{label: "▶ Run cell", key: m.keys.Run.Help().Key, act: a(actRunCell)})
 		}
 		if m.fixable(c) {
-			items = append(items, menuItem{label: "✦ Fix with AI", key: "f", act: a(actFixCell)})
+			items = append(items, menuItem{label: "✦ Fix with AI", key: m.keys.Fix.Help().Key, act: a(actFixCell)})
 		}
 		if m.editable(c) {
-			items = append(items, menuItem{label: "✦ Ask AI…", key: "e", act: a(actAskCell)})
+			items = append(items, menuItem{label: "✦ Ask AI…", key: m.keys.Ask.Help().Key, act: a(actAskCell)})
 		}
 	} else {
-		items = append(items, menuItem{label: "▶ Render", key: "^↵", act: a(actRunCell)})
+		items = append(items, menuItem{label: "▶ Render", key: m.keys.Run.Help().Key, act: a(actRunCell)})
 	}
 	if m.mode != modeEdit || i != m.sel {
-		items = append(items, menuItem{label: "✎ Edit", key: "↵", act: a(actEditCell)})
+		items = append(items, menuItem{label: "✎ Edit", key: m.keys.Edit.Help().Key, act: a(actEditCell)})
 	}
 	items = append(items,
 		menuItem{sep: true},
-		menuItem{label: "Insert above", key: "a", act: a(actInsertAbove)},
-		menuItem{label: "Insert below", key: "b", act: a(actInsertBelow)},
+		menuItem{label: "Insert above", key: m.keys.InsertAbove.Help().Key, act: a(actInsertAbove)},
+		menuItem{label: "Insert below", key: m.keys.InsertBelow.Help().Key, act: a(actInsertBelow)},
 		menuItem{label: "Duplicate", act: a(actDuplicate)},
 		menuItem{sep: true},
-		menuItem{label: "Cut cell", key: "x", act: a(actCutCell)},
-		menuItem{label: "Copy cell", key: "c", act: a(actCopyCell)},
+		menuItem{label: "Cut cell", key: m.keys.Cut.Help().Key, act: a(actCutCell)},
+		menuItem{label: "Copy cell", key: m.keys.Copy.Help().Key, act: a(actCopyCell)},
 	)
 	if m.clipboard != nil {
-		items = append(items, menuItem{label: "Paste cell below", key: "v", act: a(actPasteCell)})
+		items = append(items, menuItem{label: "Paste cell below", key: m.keys.Paste.Help().Key, act: a(actPasteCell)})
 	}
 	items = append(items,
-		menuItem{label: "Move up", key: "K", act: a(actMoveUp)},
-		menuItem{label: "Move down", key: "J", act: a(actMoveDown)},
+		menuItem{label: "Move up", key: m.keys.MoveUp.Help().Key, act: a(actMoveUp)},
+		menuItem{label: "Move down", key: m.keys.MoveDown.Help().Key, act: a(actMoveDown)},
 		menuItem{sep: true})
 	if c.kind == notebook.Code {
-		items = append(items, menuItem{label: "Convert to markdown", key: "m", act: a(actToMarkdown)})
+		items = append(items, menuItem{label: "Convert to markdown", key: m.keys.ToMarkdown.Help().Key, act: a(actToMarkdown)})
 		if len(c.outputs) > 0 {
 			items = append(items,
 				menuItem{label: "Copy output", act: a(actCopyOutput)},
-				menuItem{label: "Clear output", key: "O", act: a(actClearOutput)})
+				menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
 		}
 	} else {
-		items = append(items, menuItem{label: "Convert to code", key: "y", act: a(actToCode)})
+		items = append(items, menuItem{label: "Convert to code", key: m.keys.ToCode.Help().Key, act: a(actToCode)})
 	}
 	if m.hasOutputs() {
-		items = append(items, menuItem{label: "Clear all outputs", key: "D", act: a(actClearAllOutput)})
+		items = append(items, menuItem{label: "Clear all outputs", key: m.keys.ClearAllOutput.Help().Key, act: a(actClearAllOutput)})
 	}
 	items = append(items,
 		menuItem{sep: true},
-		menuItem{label: "Delete cell", key: "dd", act: a(actDeleteCell), danger: true})
+		menuItem{label: "Delete cell", key: m.keys.Delete.Help().Key, act: a(actDeleteCell), danger: true})
 
 	m.menu = menuState{items: items, x: x, y: y}
 	m.menu.idx = -1
@@ -605,15 +605,15 @@ func synthKey(s string) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Text: s}
 }
 
-// commandKey runs a command-mode key binding against a given cell, so that
-// mouse actions behave exactly like their keyboard equivalents.
-func (m *Model) commandKey(cell int, k string) tea.Cmd {
+// commandKey runs a named command against a cell, regardless of its keys.
+// Mouse actions must keep working even when their command is unbound.
+func (m *Model) commandKey(cell int, name string) tea.Cmd {
 	if cell >= 0 && cell < len(m.cells) {
 		m.sel = cell
 	}
 	m.leaveEdit()
 	m.pendingKey = ""
-	return m.handleCommandKey(synthKey(k))
+	return m.runCommand(name, true)
 }
 
 // doAction executes a clickable action.
@@ -684,31 +684,31 @@ func (m *Model) doAction(a action) tea.Cmd {
 			m.enterEdit()
 		}
 	case actInsertAbove:
-		return m.commandKey(a.cell, "a")
+		return m.commandKey(a.cell, "insert_above")
 	case actInsertBelow:
-		return m.commandKey(a.cell, "b")
+		return m.commandKey(a.cell, "insert_below")
 	case actCutCell:
-		return m.commandKey(a.cell, "x")
+		return m.commandKey(a.cell, "cut")
 	case actCopyCell:
-		return m.commandKey(a.cell, "c")
+		return m.commandKey(a.cell, "copy")
 	case actPasteCell:
-		return m.commandKey(a.cell, "v")
+		return m.commandKey(a.cell, "paste")
 	case actMoveUp:
-		return m.commandKey(a.cell, "K")
+		return m.commandKey(a.cell, "move_up")
 	case actMoveDown:
-		return m.commandKey(a.cell, "J")
+		return m.commandKey(a.cell, "move_down")
 	case actToMarkdown, actToCode:
 		if validCell {
 			m.convertCell(a.cell, a.kind == actToCode)
 		}
 	case actClearOutput:
-		return m.commandKey(a.cell, "O")
+		return m.commandKey(a.cell, "clear_output")
 	case actFixCell:
-		return m.commandKey(a.cell, "f")
+		return m.commandKey(a.cell, "fix")
 	case actFormatCell:
 		return m.formatCell(a.cell)
 	case actAskCell:
-		return m.commandKey(a.cell, "e")
+		return m.commandKey(a.cell, "ask")
 	case actAskSend:
 		return m.sendAsk()
 	case actReviewApply:
@@ -730,7 +730,7 @@ func (m *Model) doAction(a action) tea.Cmd {
 		if validCell {
 			m.leaveEdit()
 			m.deleteCell(a.cell)
-			return m.setStatus(statusInfo, "cell deleted · z to undo")
+			return m.setStatus(statusInfo, "%s", withKey("cell deleted · undo delete", m.keys.Undelete))
 		}
 	case actCopyOutput:
 		if validCell {

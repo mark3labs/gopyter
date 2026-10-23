@@ -44,6 +44,31 @@ func TestSidebarToggle(t *testing.T) {
 	}
 }
 
+func TestSidebarConfiguredBinding(t *testing.T) {
+	m := sidebarModel()
+	var warnings []string
+	m.keys, warnings = newKeyMapFrom(map[string][]string{"sidebar": {"alt+b"}})
+	if len(warnings) != 0 {
+		t.Fatal(warnings)
+	}
+	m.handleKey(press('b', tea.ModCtrl))
+	if m.side.open {
+		t.Fatal("old sidebar binding still active")
+	}
+	m.handleKey(press('b', tea.ModAlt))
+	if !m.side.open || !m.side.focused {
+		t.Fatal("configured binding failed")
+	}
+	m.handleKey(press('b', tea.ModAlt))
+	if m.side.open {
+		t.Fatal("configured binding did not close focused sidebar")
+	}
+	m.doAction(action{kind: actToggleSidebar})
+	if !m.side.open {
+		t.Fatal("toolbar must ignore rebinding")
+	}
+}
+
 func TestSidebarAutoHide(t *testing.T) {
 	m := sidebarModel()
 	m.toggleSidebar()

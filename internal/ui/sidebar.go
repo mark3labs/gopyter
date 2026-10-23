@@ -4,6 +4,7 @@ import (
 	"image"
 	"strings"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -136,9 +137,10 @@ func (m *Model) clampSidebar(follow bool) {
 	m.side.top = clamp(m.side.top, 0, max(n*stride-rows, 0))
 }
 func (m *Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	switch msg.String() {
-	case "ctrl+b":
+	if key.Matches(msg, m.keys.Sidebar) {
 		return m.toggleSidebar(), true
+	}
+	switch msg.String() {
 	case "esc":
 		m.side.focused = false
 	case "tab", "shift+tab":
