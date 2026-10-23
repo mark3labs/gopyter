@@ -253,3 +253,9 @@ deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`
 picks a theme. In command mode, `ctrl+p` or `:` opens a searchable list of
 every available command; `enter` runs the selection and `esc` closes it.
+`ctrl+b` opens a sidebar with a table of contents and the
+kernel's variables (types and values); `tab` switches panels.
+In command mode, `alt+↑/↓` or `shift+click` extends a cell
+selection and `alt+a` selects all; cell commands act on the range. `alt+m`
+merges the range (or with the next cell), `alt+-` splits at the edit cursor,
+and command-mode `z` undoes a delete, merge or split.

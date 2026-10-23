@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +32,7 @@ func (m *Model) viewHeight() int { return max(m.height-headerHeight-footerHeight
 // minus its borders (renderCell). Shell commands run in a terminal of
 // this width, so programs wrap where the output is shown.
 func (m *Model) outWidth() int {
-	return m.width - 1 - cellMarginR - gutterWidth - 2
+	return m.bodyWidth() - 1 - cellMarginR - gutterWidth - 2
 }
 
 func (m *Model) View() tea.View {
@@ -177,6 +178,7 @@ func (m *Model) renderToolbar() string {
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
 		{act: action{kind: actSave}, full: "save", short: "save", tip: withKey("save the notebook", m.keys.Save), enabled: true},
+		{act: action{kind: actToggleSidebar}, full: "☰ sidebar", short: "☰", tip: withKey("contents and variables", m.keys.Sidebar), enabled: true},
 		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: !m.themes.fixed},
 		{act: action{kind: actHelp}, full: "? help", short: "?", tip: withKey("keyboard shortcuts", m.keys.Help), enabled: true},
 	}
@@ -244,12 +246,20 @@ func (m *Model) renderFooter() string {
 			pill = st.Render(m.vim.mode.String())
 		}
 	}
+	if m.mode == modeCommand && m.side.focused && m.sidebarWidth() > 0 {
+		bindings = m.keys.sidebarShort()
+	}
 	toggle := action{kind: actToggleMode}
 	if m.hovered(toggle) {
 		pill = t.btnHover.Render(ansi.Strip(pill))
 	}
 	m.zones = append(m.zones, zone{rect: image.Rect(0, m.height-1, lipgloss.Width(pill), m.height), act: toggle, tip: tip})
-	pos := t.muted.Render(fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells)))
+	position := fmt.Sprintf("cell %d/%d ", m.sel+1, len(m.cells))
+	if m.multiSelected() {
+		lo, hi := m.selRange()
+		position = fmt.Sprintf("cells %d–%d/%d ", lo+1, hi+1, len(m.cells))
+	}
+	pos := t.muted.Render(position)
 	avail := m.width - lipgloss.Width(pill) - lipgloss.Width(pos) - 5
 
 	var mid string
@@ -294,7 +304,7 @@ func (m *Model) renderFooter() string {
 
 // renderBody renders the scrollable list of cells and computes the cursor.
 func (m *Model) renderBody() (string, *tea.Cursor) {
-	w := m.width - 1 // leave room for the scrollbar
+	w := m.bodyWidth() - 1 // leave room for the scrollbar
 	vh := m.viewHeight()
 
 	var all []string
@@ -391,6 +401,13 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 		out[y] = line
 	}
 
+	if m.sidebarWidth() > 0 {
+		side, zs := m.renderSidebar(vh)
+		for y := range out {
+			out[y] += side[y]
+		}
+		m.zones = append(m.zones, translate(zs, m.bodyWidth(), headerHeight)...)
+	}
 	var cursor *tea.Cursor
 	if m.mode == modeEdit && m.sel < len(m.layout) {
 		l := m.layout[m.sel]
@@ -445,8 +462,8 @@ func (m *Model) renderMarkdownPanel(src string, boxW int) string {
 func (m *Model) renderCell(i, width int) cellRender {
 	t := m.theme
 	c := m.cells[i]
-	selected := i == m.sel
-	editing := selected && m.mode == modeEdit
+	selected := m.inRange(i)
+	editing := i == m.sel && m.mode == modeEdit
 
 	borderColor := t.borderIdle
 	switch {
@@ -486,7 +503,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 		// The spacer line below a rendered markdown cell hosts its action
 		// buttons when selected or hovered, so the layout never shifts.
 		r.ownSpacer = true
-		if selected || i == m.hoverCell {
+		if i == m.sel || i == m.hoverCell {
 			probe := &lineBuilder{}
 			m.cellActions(probe, i, lipgloss.NewStyle(), true)
 			lb := &lineBuilder{}
@@ -1007,6 +1024,9 @@ func (m *Model) renderOverlay() (string, []zone) {
 		perRow := clamp((m.width-10)/26, 1, len(cols))
 		// Stack sections in the shortest column rather than reserving a full
 		// grid row for short sections (notably AI and cell commands).
+		// Place tall sections first so added commands do not strand a tall
+		// editing section below an already crowded column.
+		slices.SortStableFunc(cols, func(a, b string) int { return lipgloss.Height(b) - lipgloss.Height(a) })
 		stacks := make([]string, perRow)
 		for _, col := range cols {
 			idx := 0

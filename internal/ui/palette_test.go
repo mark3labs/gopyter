@@ -106,13 +106,13 @@ func TestPaletteRunsCommand(t *testing.T) {
 	m.openPalette()
 	paletteQuery(m, "delete")
 	m.handleKey(press(tea.KeyEnter, 0))
-	if len(m.trash) != 1 || m.cur() == original {
+	if len(m.undo) != 1 || m.cur() == original {
 		t.Fatal("delete must run at once")
 	}
 	m.openPalette()
-	paletteQuery(m, "undo delete")
+	paletteQuery(m, "undo delete/merge/split")
 	m.handleKey(press(tea.KeyEnter, 0))
-	if len(m.trash) != 0 || m.cur() != original {
+	if len(m.undo) != 0 || m.cur() != original {
 		t.Fatal("undelete failed")
 	}
 }
@@ -133,7 +133,7 @@ func TestPaletteOpensOverlays(t *testing.T) {
 func TestPaletteAvailability(t *testing.T) {
 	m, _ := newPickerModel(t, "", false)
 	m.openPalette()
-	for _, s := range []string{"interrupt", "paste below", "undo delete", "input line", "fold output", "clear output", "copy output", "clear all outputs", "to code"} {
+	for _, s := range []string{"interrupt", "paste below", "undo delete/merge/split", "input line", "fold output", "clear output", "copy output", "clear all outputs", "to code"} {
 		if paletteFind(m, s) >= 0 {
 			t.Errorf("unavailable: %s", s)
 		}
@@ -214,7 +214,8 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 		}
 		seen[d] = true
 	}
-	excluded := map[string]bool{"up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
+	// Split needs an active editor cursor, just like the Editing section.
+	excluded := map[string]bool{"split cell (editing)": true, "up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
 	for _, sec := range m.keys.baseHelp() {
 		if sec.title == "Editing" {
 			continue
@@ -235,6 +236,7 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 			t.Errorf("missing %q", b)
 		}
 	}
+	m.queue = nil
 	m.convertCell(0, notebook.Markdown)
 	m.openPalette()
 	if paletteFind(m, "to code") < 0 {
@@ -323,9 +325,45 @@ func TestPaletteHelp(t *testing.T) {
 	}
 }
 
+func TestPaletteSelectionCommands(t *testing.T) {
+	m := selectionModel("a", "b", "c")
+	run := func(desc string) {
+		t.Helper()
+		m.openPalette()
+		i := paletteFind(m, desc)
+		if i < 0 {
+			t.Fatalf("missing %q", desc)
+		}
+		m.runPalette(i)
+	}
+	run("extend selection down")
+	wantRange(t, m, 0, 1)
+	run("merge cells")
+	wantSources(t, m, "a\n\nb", "c")
+	run("undo delete/merge/split")
+	wantSources(t, m, "a", "b", "c")
+	run("select all cells")
+	wantRange(t, m, 0, 2)
+	run("delete")
+	if len(m.cells) != 1 || m.cur().ed.Value() != "" {
+		t.Fatal("palette delete did not delete the selected range")
+	}
+	run("undo delete/merge/split")
+	wantSources(t, m, "a", "b", "c")
+}
+
+func TestPaletteSidebar(t *testing.T) {
+	m, _ := newPickerModel(t, "", false)
+	m.openPalette()
+	m.runPalette(paletteFind(m, "sidebar"))
+	if m.overlay != overlayNone || !m.side.open {
+		t.Fatal("palette did not open sidebar")
+	}
+}
+
 func TestPaletteConfiguredKeys(t *testing.T) {
 	m, _ := newPickerModel(t, "", false)
-	m.keys, _ = newKeyMapFrom(map[string][]string{"palette": {"ctrl+o"}, "top": {}, "to_markdown": {"alt+m"}})
+	m.keys, _ = newKeyMapFrom(map[string][]string{"palette": {"ctrl+o"}, "top": {}, "to_markdown": {"alt+o"}})
 	m.handleKey(press('p', tea.ModCtrl))
 	if m.overlay != overlayNone {
 		t.Fatal("old key still bound")
@@ -335,7 +373,7 @@ func TestPaletteConfiguredKeys(t *testing.T) {
 		t.Fatal("rebound key failed")
 	}
 	paletteQuery(m, "to markdown")
-	if m.palette.rows[0].cmd.binding.Help().Key != "alt+m" {
+	if m.palette.rows[0].cmd.binding.Help().Key != "alt+o" {
 		t.Fatal("configured key not shown")
 	}
 	m.runPalette(0)
