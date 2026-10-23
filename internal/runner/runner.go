@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/markdown"
@@ -62,15 +63,15 @@ func renderMarkdown(s string, width int) string {
 }
 
 // renderImage draws a base64 image, or describes it when draw is false.
-func renderImage(b64 string, draw bool, width int) string {
+func renderImage(b64 string, draw bool, width int, d termimg.Drawer) string {
 	img, err := termimg.Decode(b64)
 	if err != nil {
 		return errStyle.Render("can't show image: " + err.Error())
 	}
 	if !draw {
-		return resultStyle.Render("=> " + termimg.Placeholder(img))
+		return resultStyle.Render("=> " + termimg.Description(img))
 	}
-	return strings.Join(termimg.Render(img, width, 40), "\n")
+	return strings.Join(termimg.Draw(d, img, b64, width, 40), "\n")
 }
 
 // htmlStyles draw HTML outputs; widgets are drawn inactive.
@@ -86,8 +87,8 @@ var htmlStyles = htmlview.Styles{
 	Accent:      labelStyle,
 }
 
-func renderHTML(s string, tty bool, width int) string {
-	lines, _ := htmlview.Render(s, htmlview.Options{Width: width, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty})
+func renderHTML(s string, tty bool, width int, d termimg.Drawer) string {
+	lines, _ := htmlview.Render(s, htmlview.Options{Width: width, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty, Images: d})
 	return strings.Join(lines, "\n")
 }
 
@@ -132,6 +133,20 @@ func (e *events) close() {
 // printing them to w. Programs read stdin (nil for no input). It returns
 // the number of failed cells.
 func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writer, stdin io.Reader, failFast bool) int {
+	return RunWith(ctx, k, nb, w, stdin, Options{FailFast: failFast})
+}
+
+// RunWith executes a notebook with optional full-resolution image drawing.
+func RunWith(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writer, stdin io.Reader, opts Options) int {
+	gfx := opts.Graphics
+	if f, ok := w.(*os.File); !ok || !term.IsTerminal(f.Fd()) {
+		gfx = nil
+	} else if gfx != nil {
+		cw, ch := termimg.CellSize(f)
+		gfx.SetCellSize(cw, ch)
+	}
+	// Retain scrollback images across cells as well as within a cell.
+	var scrollback []termimg.Key
 	// Images are drawn with colored half blocks, which are noise without
 	// colors (e.g. when the output is redirected to a file). The same goes
 	// for redrawing DisplayID outputs in place.
@@ -149,12 +164,16 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			writeln(w, codeStyle.Render("  │ "+l))
 		}
 
+		bl := newBlocks(w, tty)
+		bl.gfx, bl.savedImages = gfx, scrollback
+		cellOpts := Options{Images: tty, Redraw: tty, Width: 100}
 		start := time.Now()
-		err := RunCell(ctx, k, c, count, w, stdin, Options{Images: tty, Redraw: tty})
+		err := runCell(ctx, k, c, count, w, stdin, cellOpts, bl)
+		scrollback = bl.savedImages
 		if err != nil {
 			failed++
 			writeln(w, errStyle.Render("✗ "+err.Error()))
-			if failFast || errors.Is(err, kernel.ErrInterrupted) {
+			if opts.FailFast || errors.Is(err, kernel.ErrInterrupted) {
 				return failed
 			}
 		} else {
@@ -167,9 +186,11 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 
 // Options control output rendering independently of in-place updates.
 type Options struct {
-	Images bool // draw images rather than placeholders
-	Redraw bool // redraw the last updated output in place
-	Width  int  // rendering width; zero defaults to 100
+	FailFast bool           // stop a notebook run after the first failure
+	Graphics *termimg.Kitty // optional full-resolution images for notebook runs
+	Images   bool           // draw images rather than placeholders
+	Redraw   bool           // redraw the last updated output in place
+	Width    int            // rendering width; zero defaults to 100
 }
 
 // RunCell executes one input, replacing its outputs and execution count.
@@ -179,6 +200,12 @@ func RunCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int,
 	if opts.Width <= 0 {
 		opts.Width = 100
 	}
+	return runCell(ctx, k, c, count, w, stdin, opts, newBlocks(w, opts.Redraw))
+}
+
+// runCell shares rendering with notebook runs while retaining their image scrollback.
+func runCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int, w io.Writer, stdin io.Reader, opts Options, bl *blocks) error {
+	bl.opts = opts
 	c.ExecutionCount, c.Outputs = count, nil
 	name := fmt.Sprintf("In[%d]", count)
 	appendOut := func(kind notebook.OutputKind, text, id string) int {
@@ -188,7 +215,6 @@ func RunCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int,
 	}
 	// Program output that styles itself (escape codes) is passed
 	// through: write adapts its colors to w.
-	bl := newBlocks(w, opts.Redraw)
 	rawOut := false
 	stream := func(st lipgloss.Style, text string) {
 		bl.other()
@@ -206,7 +232,7 @@ func RunCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int,
 			if r.Changed {
 				for i := range r.Outputs {
 					if r.Outputs[i].Text != c.Outputs[i].Text {
-						bl.show(outputKey(r.Outputs, i), renderOutput(r.Outputs[i], opts), r.Outputs[i].ID != "", false)
+						bl.showOutput(outputKey(r.Outputs, i), r.Outputs[i], r.Outputs[i].ID != "", false)
 					}
 				}
 				c.Outputs = r.Outputs
@@ -225,7 +251,7 @@ func RunCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int,
 		case kernel.Stderr:
 			stream(stderrStyle, e.Text)
 		case kernel.Result, kernel.Markdown, kernel.Image, kernel.HTML:
-			bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], opts), e.ID != "", true)
+			bl.showOutput(outputKey(c.Outputs, i), c.Outputs[i], e.ID != "", true)
 		case kernel.Error:
 			bl.other()
 			writeln(w, paint(errStyle, e.Text))

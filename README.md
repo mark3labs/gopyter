@@ -11,6 +11,7 @@ so GoNB notebooks run in gopyter too. See [Acknowledgements](#acknowledgements).
 
 - **Real Go, cell by cell.** Declarations persist across cells, the last expression is displayed, and compile errors point at cell lines
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
+- **Live diagnostics.** With gopls, errors and warnings are underlined as you type; the message under the cursor appears in the footer
 - **Symbol info.** `alt+k` (or `K` in vim) shows the signature and docs of the function, type or variable under the cursor
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter, and GoNB notebooks (cell commands, `gonbui`, widgets) run in gopyter
@@ -46,7 +47,7 @@ it. Intel Macs are served by the two commands above, since nixpkgs no longer
 supports them.
 
 **Requirements:** the [Go toolchain](https://go.dev/dl/) on your `PATH`, since
-cells are compiled with it. For completion and symbol info, install
+cells are compiled with it. For completion, symbol info and live diagnostics, install
 `go install golang.org/x/tools/gopls@latest` (without it, gopyter falls back to
 basic completion). The Go toolchain is *not* part of the Nix closure: cells are
 compiled with whatever `go` is on your `PATH`, so install Go from Nix too if the
@@ -134,6 +135,9 @@ They run headless too: `gopyter run examples/images.ipynb`.
 
   `CacheErr` does not store failed results. `%cache clear resp` forces a recompute.
 - Imports are added automatically, and third-party modules are fetched on first use.
+  Until a cell importing a third-party module has been built, live diagnostics
+  may report missing imports or undefined package names. Diagnostics also omit
+  parse errors located in generated wrapper code (such as an unclosed block at EOF).
 
 ## Rich output
 
@@ -156,7 +160,8 @@ declare them itself, so a notebook can have its own `Display`.
 
 - Images are drawn in the output: `nb.Display` an `image.Image` (or end the
   cell with one), or pass PNG bytes to `nb.DisplayPNG(data)`. They are drawn with
-  colored half blocks (two pixels per character), scaled to fit the cell, and
+  the Kitty graphics protocol on kitty and Ghostty, or colored half blocks
+  (two pixels per character) elsewhere, scaled to fit the cell, and
   saved in the notebook as `image/png`, so Jupyter shows them too. Images in
   notebooks from Jupyter (PNG, JPEG, GIF) are shown as well. `gopyter run`
   draws them when its output is a color terminal and prints `[image WxH]`
@@ -281,7 +286,8 @@ as in GoNB, variables stay in that cell.
 ## Keys
 
 gopyter is modal like Jupyter: **command mode** (blue) works on cells, **edit
-mode** (green) edits text. Press `?` for the full list.
+mode** (green) edits text. Press `?` for the full list, or `ctrl+p` (or `:`)
+to search and run any command.
 
 | Key                          | Action                                   |
 |------------------------------|------------------------------------------|
@@ -293,18 +299,49 @@ mode** (green) edits text. Press `?` for the full list.
 | `enter` on a running cell    | focus its widgets (`tab` next, `ctrl+d` done) |
 | `j` `k` `g` `G`              | move selection                           |
 | `a` / `b`                    | insert cell above / below                |
-| `dd` / `z`                   | delete / undo delete                     |
+| `dd` / `z`                   | delete / undo delete, merge or split     |
+| `alt+↑` / `alt+↓`, `shift+click` | extend cell selection (command mode) |
+| `alt+a`                      | select all cells (command mode)          |
+| `alt+m`                      | merge selection, or merge with next      |
+| `alt+-`                      | split at cursor (edit mode, including vim) |
 | `x` `c` `v`, `K` / `J`       | cut / copy / paste, move cell up / down  |
-| `m` / `y` (`ctrl+t` editing) | convert to markdown / code               |
+| `m` / `y` / `r`             | convert to markdown / code / raw (`ctrl+t` toggles code/markdown while editing) |
+| `I`                          | hide/show code or raw input (outputs stay visible) |
+| `<` / `>`                    | scroll text output left/right; first `>` stops wrapping, `<` at column zero restores it |
+| `E`                          | edit the selected cell in `$VISUAL` / `$EDITOR` (fallback: `vi`) |
+| `C`                          | copy the cell's output to the clipboard |
+| `alt+r`                      | restart kernel and clear idle cells' outputs (both modes) |
+| `alt+s`                      | save as a new path (both modes) |
 | `alt+shift+f`                | format the selected Go cell with gofmt    |
 | `o` / `O`                    | fold long output / clear output          |
 | `D`                          | clear every cell's output                |
+| `ctrl+b`                     | sidebar: contents and variables (`tab` switches) |
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
+| `ctrl+p` or `:`               | command palette: type to find a command, enter runs it |
 | `V`                          | turn vim bindings on / off (saved)       |
 | `M`                          | pick the AI model, or turn AI on / off   |
 | `e`                          | ask AI to write or change a cell (when AI is on) |
 | `f`                          | fix a failing cell with AI (when AI is on) |
+
+The sidebar starts hidden. **Contents** lists markdown headings (levels 1–3);
+**Variables** shows persisted declarations with types and one-line value previews
+from the last saving run. `tab` switches panels, arrows move, `enter` jumps to
+the declaring cell, and `esc` returns focus to the notebook. It automatically
+hides in narrow terminals and returns when there is room again.
+
+Run, delete, cut/copy/paste, move, convert and clear-output commands apply to
+every selected cell. Other cell commands use the cursor cell. `esc`, navigation,
+plain click and entering edit mode collapse the range. Paste selects the pasted
+cells. Merge keeps the first cell's type and metadata, comments prose into Go
+and fences Go into markdown; running or queued cells cannot be merged or split.
+Split keeps outputs on the original cell. Cell-level `z` retains the last 100
+delete/merge/split operations, separate from editor undo; undoing a split after
+editing either half reports `can't undo split: cell changed` rather than losing edits.
+
+Some terminals intercept `alt+arrow`; `shift+click` is the selection fallback.
+In macOS Terminal, enable **Use Option as Meta** (otherwise Option word motions
+or `alt+-` typing `–` may be intercepted).
 
 Format a code cell with `alt+shift+f` (in command or edit mode), or the `fmt`
 button at the bottom right of the selected/hovered code cell. Formatting uses
@@ -321,6 +358,43 @@ cursor, or of the enclosing call when the cursor is among its arguments;
 `pgup`/`pgdn` scroll it and any other key dismisses it.
 `shift+enter` and `ctrl+enter` need a terminal with the kitty keyboard protocol
 (kitty, Ghostty, WezTerm, foot…); `ctrl+r` and `ctrl+j` work everywhere.
+
+### Custom keys
+
+The table above lists defaults. Run `gopyter keys` to list all command names,
+current keys, defaults and descriptions (`*` marks configured commands).
+Add a `keys` object to [config.json](#themes):
+
+```json
+{
+  "theme": "nord",
+  "keys": {
+    "run_all": ["A", "ctrl+a"],
+    "quit": [],
+    "move_up": ["alt+k"]
+  }
+}
+```
+
+Each list **replaces** that command's defaults; `[]` or `null` unbinds it.
+Omitted commands keep their defaults. `escape` cannot be left unbound.
+Keys use Bubble Tea names such as `ctrl+s`, `alt+enter`, `shift+up`, `A`, `?`,
+`f1`, `pgdown` and `space`. Modifiers are normalized to ctrl, alt, shift, meta,
+hyper, super order. Use `A`, not `shift+a`; with modifiers use
+`ctrl+shift+a`, not `ctrl+A`. Delete still requires pressing its key twice.
+
+Unknown commands, malformed keys and conflicts produce warnings on stderr and
+in the startup status bar; the rest of the settings still apply. A key cannot
+belong to two commands in the same mode; global bindings conflict with both
+command and edit modes. The overridden command loses the conflicting key; if
+both were overridden, the later command in `gopyter keys` loses it. Command
+and edit bindings do not conflict with each other. Help, hints and tooltips
+reflect the configured keys, and mouse actions work even when unbound.
+
+User bindings take priority over fixed editor keys (for example rebinding
+`undo` to `ctrl+u` replaces kill-to-start); these shadows are not warned about.
+Vim, dialogs, menus, pickers, input lines, widgets and `alt+shift+f` are not
+configurable here. There are no per-notebook or command-line key overrides.
 
 ### Vim bindings
 
@@ -348,9 +422,22 @@ Yanks also go to the system clipboard, and a mouse selection turns into a
 visual selection. Since `ctrl+r` is redo in NORMAL mode, run cells from there
 with `shift+enter` or `ctrl+j` (`ctrl+r` still runs from INSERT and command mode).
 
+Raw cells are plain text and never run. Hiding input is saved as Jupyter's
+`metadata.jupyter.source_hidden`; entering edit mode shows it again. Duplicated
+cells start with visible input. Sideways scrolling affects stdout, stderr and
+text results only, and is not saved. Programs that wrap their own terminal
+output keep doing so. Restart-and-clear interrupts a running cell, but leaves
+its output until it finishes, just like clearing outputs with `D`. Save-as
+moves file watching to the new path, but does not move the kernel's run directory.
+
 ## Mouse
 
+Click the sidebar's panel headers to switch panels, or an entry to jump to its
+cell. The wheel over the sidebar scrolls its list independently of the notebook.
+
 Click a cell to edit it, and drag, double-click or triple-click to select text.
+Click a hidden-input placeholder to show the source. Under unwrapped text output,
+click `◂` / `▸` to scroll or **wrap** to restore wrapping.
 Hover `[n]` and click `[▶]` to run a cell; the buttons on a cell's border run,
 convert, move, duplicate or delete it. Right-click opens a context menu, and the
 toolbar under the title covers running, adding cells, saving, themes and help. Hovering
@@ -370,7 +457,7 @@ The choice is saved to `$XDG_CONFIG_HOME/gopyter/config.json` (usually
 macOS):
 
 ```json
-{ "theme": "catppuccin" }
+{ "theme": "catppuccin", "keys": { "run_all": ["ctrl+a"], "quit": [] } }
 ```
 
 ```sh
@@ -378,6 +465,23 @@ gopyter themes                     # list themes, marking the active one
 gopyter --theme dracula notes.ipynb  # use a theme for this session only
 gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
 ```
+
+## Images
+
+`--graphics=auto` (the default) detects kitty and Ghostty from the environment,
+without terminal queries. `--graphics=kitty` forces Unicode-placeholder images;
+`--graphics=blocks` always uses portable half blocks. Both the TUI and
+`gopyter run` accept the flag. The saved default can be set in the settings file:
+
+```json
+{ "graphics": "blocks" }
+```
+
+Kitty graphics needs at least 256 colors. In tmux (3.3+), enable passthrough
+with `set -g allow-passthrough on`; otherwise auto falls back to blocks and a
+forced kitty request warns. WezTerm is not auto-detected because its Kitty
+support does not yet include Unicode placeholders. Images scroll and clip like
+text, and menus cover them normally (images themselves are not dimmed).
 
 ## AI (optional)
 
@@ -440,6 +544,9 @@ gopyter format notes.ipynb         # format code cells in place, without running
 ```
 
 It exits non-zero if any cell fails, so it works as a CI check for notebooks.
+On kitty/Ghostty, images use Kitty graphics, with the same `--graphics` override
+as the TUI. Graphics commands are never written to redirected output, even when
+colors are forced; it keeps half blocks or `[image WxH]` descriptions.
 On a terminal, outputs that update (`nb.DisplayID`, `gonbui.UpdateHTML`, DOM
 changes) are redrawn in place. When the output isn't a terminal, they're
 printed once, in their final state, when the cell ends, so logs don't get a
@@ -489,7 +596,62 @@ and run without a TUI. Programs receive no stdin (it belongs to the script),
 and any failed input makes the command exit non-zero. `--workdir` selects a
 persistent kernel workspace as with the notebook commands.
 
+## Serving over SSH
+
+`gopyter serve` runs a separate notebook TUI, temporary kernel workspace and
+completion engine for every SSH session, inspired by
+[euporie-hub](https://github.com/joouha/euporie).
+
+```sh
+gopyter serve ~/notes --authorized-keys ~/.ssh/authorized_keys
+ssh -t -p 2222 localhost analysis.ipynb   # open or create ~/notes/analysis.ipynb
+ssh -t -p 2222 localhost sub/plots.ipynb  # paths are relative to ~/notes
+ssh -t -p 2222 localhost                 # new unnamed notebook
+```
+
+The directory defaults to `.`. A PTY is required (`ssh -t`). Commands must be
+one relative `.ipynb` path; command paths and save-as names cannot escape the
+directory, including through symlinks. Missing notebooks are created on save.
+Disconnecting cancels running cells and AI requests and closes that session's
+completion engine and kernel.
+
+| Flag | Default / purpose |
+|---|---|
+| `--authorized-keys FILE` | **Required** OpenSSH public-key allowlist; unreadable, empty or malformed files prevent startup |
+| `--listen ADDRESS` | `127.0.0.1:2222`; choose a non-loopback address deliberately to expose it to the network |
+| `--host-key FILE` | `gopyter/ssh_host_ed25519` in the user config directory; a missing ed25519 key is generated with mode 0600 |
+| `--theme NAME`, `--light` | saved theme, dark by default; one shared theme for all sessions, with the theme picker disabled |
+| `--vim`, `--no-complete`, `--model` | same per-session defaults as the local TUI; `--no-complete` avoids per-session gopls |
+
+`--workdir` is not supported: each session needs its own workspace. The startup
+log prints the address, authorized_keys path and host key's SHA256 fingerprint.
+**Compare that fingerprint with SSH's first-connect prompt** before accepting
+it (or inspect the public key with `ssh-keygen -lf HOST_KEY.pub`). Password and
+keyboard-interactive authentication are never offered; there is no anonymous
+mode.
+
+**Security:** Everyone whose key is in `--authorized-keys` can run any code as
+the user running `gopyter serve`: use it for yourself or a team that already
+shares that account. This is **not a multi-tenant notebook hub**. Cells and
+shell commands have that user's files, credentials, network and environment,
+including API keys; remote AI uses the server's AI configuration and credentials.
+Path confinement prevents mistakes, **not a sandbox**: a cell can still write
+anywhere that OS user can. Treat giving someone access exactly like giving
+them a shell. Each session also costs a workspace, gopls process (unless
+disabled), and Go builds; session limits are not provided.
+
+Sessions opening the same notebook keep separate in-memory copies and kernels.
+A notice warns when another session already has the file open. Saves use atomic
+replacement, so files are not torn, but **the last save wins**. Clean sessions
+reload within a second; dirty sessions show **Reload / Keep mine**, as described
+in [Editing outside gopyter](#editing-outside-gopyter).
+
 ## Editing outside gopyter
+
+Press `E` in command mode to edit a cell in `$VISUAL`, then `$EDITOR`, falling
+back to `vi`. Space-separated arguments such as `code --wait` are supported.
+Saving and quitting applies the source as one undo step without running it.
+Jupyter's `source_hidden` metadata is kept when saving and reloading notebooks.
 
 gopyter checks the notebook file once a second. If another program changes it,
 for example an editor or `gopyter run --save`, gopyter reloads it and keeps
@@ -500,6 +662,12 @@ Reloading doesn't reset the kernel, so declarations from cells you already ran
 stay in effect. External edits to cell text can be undone.
 
 ## Acknowledgements
+
+The Contents and Variables sidebar is inspired by
+[euporie](https://github.com/joouha/euporie) (behavior, not code).
+
+Multi-cell selection, merge and cursor split follow
+[euporie](https://github.com/joouha/euporie)'s notebook operations.
 
 gopyter owes a lot to [GoNB](https://github.com/janpfeifer/gonb), the Go
 kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):
@@ -526,6 +694,13 @@ work. To run Go notebooks in Jupyter itself, use GoNB.
 The inline console's scrollback-first interaction and conversion to a notebook
 follow [euporie's console](https://github.com/joouha/euporie); its execution
 model remains the same GoNB-inspired kernel used by notebooks.
+
+The Kitty Unicode-placeholder image approach is borrowed from
+[euporie](https://github.com/joouha/euporie): transmit once, place virtually,
+and let ordinary text cells handle scrolling, clipping and compositing.
+
+The SSH notebook server model is borrowed from
+[euporie-hub in euporie](https://github.com/joouha/euporie).
 
 ## Development
 

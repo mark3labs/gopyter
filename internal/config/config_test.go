@@ -12,7 +12,7 @@ func TestLoadMissing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s != (Settings{}) {
+	if s.Theme != "" || s.Vim || s.AIModel != "" || s.AIOff || s.Keys != nil {
 		t.Fatalf("got %+v, want zero settings", s)
 	}
 }
@@ -143,5 +143,22 @@ func TestHistoryPath(t *testing.T) {
 	}
 	if h != filepath.Join(filepath.Dir(p), "console_history") {
 		t.Fatal(h)
+	}
+}
+
+func TestUpdatePreservesKeys(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(p, []byte(`{"keys":{"quit":[],"run_all":["A","ctrl+a"]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpdateAt(p, func(s *Settings) { s.Theme = "nord" }); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadFrom(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Keys["quit"] == nil || len(s.Keys["quit"]) != 0 || len(s.Keys["run_all"]) != 2 || s.Keys["run_all"][1] != "ctrl+a" {
+		t.Fatalf("keys lost: %#v", s.Keys)
 	}
 }

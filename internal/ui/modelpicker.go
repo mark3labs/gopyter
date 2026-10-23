@@ -387,12 +387,12 @@ func (m *Model) setAI(model string, on bool) tea.Cmd {
 		}
 	}
 	if !on {
-		return m.setStatus(statusInfo, "AI off · M to turn it back on")
+		return m.setStatus(statusInfo, "%s", withKey("AI off · turn it back on", m.keys.AIModel))
 	}
 	if err := m.assistant.Ready(); err != nil {
 		return m.setStatus(statusError, "AI model %s: %v", model, err)
 	}
-	return m.setStatus(statusSuccess, "AI model %s · e asks it to change a cell, f fixes a failing one", model)
+	return m.setStatus(statusSuccess, "AI model %s · %s; %s", model, withKey("ask to change a cell", m.keys.Ask), withKey("fix a failing cell", m.keys.Fix))
 }
 
 // handleModelPickerKey handles keys while the picker is open. Letters go

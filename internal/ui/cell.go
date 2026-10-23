@@ -2,13 +2,16 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/htmlview"
+	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 type cellStatus int
@@ -37,13 +40,19 @@ type Cell struct {
 	duration time.Duration
 	expanded bool
 	metadata map[string]any
+	// Horizontal text output state is local to this UI session.
+	noWrap         bool
+	scrollX, textW int
 	// ran is set once the cell has run in the current kernel session. The
 	// execution count may come from the saved notebook instead.
 	ran bool
 
+	toc          []markdown.Heading
+	tocSrc       string
 	mdSrc, mdOut string
 	mdWidth      int
 
+	images      []termimg.Key // referenced by cached output lines
 	outKey      outputKey
 	outLines    []string
 	outResultAt int
@@ -56,13 +65,16 @@ type Cell struct {
 // outputKey fingerprints the outputs, and how their widgets are drawn.
 type outputKey struct {
 	width, n, last, rev int
+	gfx                 int
 	kind                notebook.OutputKind
 	focus               string
 	live                bool
+	noWrap              bool
+	scrollX             int
 }
 
 func (c *Cell) outputFingerprint(width int, focus string, live bool) outputKey {
-	k := outputKey{width: width, n: len(c.outputs), rev: c.outRev, focus: focus, live: live}
+	k := outputKey{width: width, n: len(c.outputs), rev: c.outRev, focus: focus, live: live, noWrap: c.noWrap, scrollX: c.scrollX}
 	if k.n > 0 {
 		k.last = len(c.outputs[k.n-1].Text)
 		k.kind = c.outputs[k.n-1].Kind
@@ -108,6 +120,45 @@ func diskStatus(c *notebook.Cell) cellStatus {
 
 func (c *Cell) toNotebook() *notebook.Cell {
 	return &notebook.Cell{ID: c.id, Type: c.kind, Source: c.ed.Value(), ExecutionCount: c.count, Outputs: c.outputs, Metadata: c.metadata}
+}
+
+// inputHidden reads Jupyter's standard source visibility flag.
+func (c *Cell) inputHidden() bool {
+	j, _ := c.metadata["jupyter"].(map[string]any)
+	h, _ := j["source_hidden"].(bool)
+	return h
+}
+
+// setInputHidden copies shared metadata before changing source visibility.
+func (c *Cell) setInputHidden(on bool) {
+	c.metadata = maps.Clone(c.metadata)
+	j, _ := c.metadata["jupyter"].(map[string]any)
+	j = maps.Clone(j)
+	if on {
+		if c.metadata == nil {
+			c.metadata = map[string]any{}
+		}
+		if j == nil {
+			j = map[string]any{}
+		}
+		j["source_hidden"] = true
+	} else {
+		delete(j, "source_hidden")
+	}
+	if len(j) == 0 {
+		delete(c.metadata, "jupyter")
+	} else {
+		c.metadata["jupyter"] = j
+	}
+}
+
+func (c *Cell) hasTextOutput() bool {
+	for _, o := range c.outputs {
+		if o.Kind == notebook.Stdout || o.Kind == notebook.Stderr || o.Kind == notebook.Result {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Cell) clone() *Cell {
