@@ -132,6 +132,7 @@ type Model struct {
 	meta        map[string]any
 	cells       []*Cell
 	sel         int
+	anchor      int // other end of the command-mode range; -1 for a single cell
 	mode        mode
 
 	width, height int
@@ -171,8 +172,8 @@ type Model struct {
 	input      textinput.Model
 	quitAfter  bool
 	pendingKey string
-	clipboard  *Cell
-	trash      []trashed
+	clipboard  []*Cell
+	undo       []cellUndo
 	quitting   bool
 
 	// Mouse state.
@@ -191,11 +192,6 @@ type Model struct {
 	}
 }
 
-type trashed struct {
-	cell  *Cell
-	index int
-}
-
 // New creates the root model.
 func New(opts Options) *Model {
 	nb := opts.Notebook
@@ -204,7 +200,7 @@ func New(opts Options) *Model {
 	}
 	m := &Model{
 		k: opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
-		follow: true, hoverCell: -1,
+		follow: true, hoverCell: -1, anchor: -1,
 	}
 	m.keys, m.keyWarnings = newKeyMapFrom(opts.Keys)
 	if opts.AI != nil {
@@ -484,6 +480,9 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 
 	// Global bindings.
 	switch {
+	case m.mode == modeEdit && key.Matches(msg, k.Split):
+		m.closeCompletion()
+		return m.splitCell(m.sel)
 	case msg.String() == "alt+shift+f" || msg.String() == "alt+shift+F" || msg.String() == "alt+F":
 		return m.formatCell(m.sel)
 	case key.Matches(msg, k.RunAdvance) && (!m.vimActive() || msg.String() != "ctrl+r"):
@@ -724,6 +723,7 @@ func (m *Model) leaveEdit() {
 // enterEdit switches to edit mode. With vim bindings, entering from
 // command mode starts in normal mode; moving between cells keeps the mode.
 func (m *Model) enterEdit() {
+	m.collapse()
 	if m.mode != modeEdit && m.vim.enabled {
 		m.vim.reset()
 		m.vim.mode = vimNormal
@@ -750,6 +750,10 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.runCommand(name, repeat)
 	}
 	if msg.String() == "esc" {
+		if m.multiSelected() {
+			m.collapse()
+			return nil
+		}
 		return m.cancelTask()
 	}
 	return nil
@@ -757,14 +761,27 @@ func (m *Model) handleCommandKey(msg tea.KeyPressMsg) tea.Cmd {
 
 // runCommand is shared by keyboard lookup and direct mouse actions.
 func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
+	lo, hi := m.selRange()
 	switch name {
+	case "extend_up":
+		m.extendTo(m.sel - 1)
+	case "extend_down":
+		m.extendTo(m.sel + 1)
+	case "select_all":
+		m.anchor, m.sel = 0, len(m.cells)-1
+	case "merge":
+		return m.mergeCells()
 	case "up":
+		m.collapse()
 		m.sel = max(m.sel-1, 0)
 	case "down":
+		m.collapse()
 		m.sel = min(m.sel+1, len(m.cells)-1)
 	case "top":
+		m.collapse()
 		m.sel = 0
 	case "bottom":
+		m.collapse()
 		m.sel = len(m.cells) - 1
 	case "page_up":
 		m.follow = false
@@ -773,6 +790,7 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 		m.follow = false
 		m.offset += m.viewHeight() / 2
 	case "edit":
+		m.collapse()
 		if len(m.inputItems()) > 0 && m.cur() == m.runningCell() {
 			// The running cell: use its widgets or type its input.
 			return m.focusFirstInput()
@@ -784,41 +802,53 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 		m.insertCell(m.sel+1, newCell(notebook.Code, ""))
 	case "delete":
 		if repeat {
-			m.deleteCell(m.sel)
-			return m.setStatus(statusInfo, "%s", withKey("cell deleted · undo delete", m.keys.Undelete))
+			m.deleteCells(lo, hi)
+			return m.deletedStatus(hi - lo + 1)
 		}
 
 	case "undelete":
-		if n := len(m.trash); n > 0 {
-			t := m.trash[n-1]
-			m.trash = m.trash[:n-1]
-			m.insertCell(min(t.index, len(m.cells)), t.cell)
-			m.mode = modeCommand
+		return m.undoCells()
+	case "cut", "copy":
+		m.clipboard = nil
+		for _, c := range m.cells[lo : hi+1] {
+			m.clipboard = append(m.clipboard, c.clone())
 		}
-	case "cut":
-		m.clipboard = m.cur().clone()
-		src := m.cur().ed.Value()
-		m.deleteCell(m.sel)
-		return tea.Batch(tea.SetClipboard(src), m.setStatus(statusInfo, "cell cut"))
-	case "copy":
-		m.clipboard = m.cur().clone()
-		return tea.Batch(tea.SetClipboard(m.cur().ed.Value()), m.setStatus(statusInfo, "cell copied"))
+		src := joinSources(m.clipboard)
+		if name == "cut" {
+			m.deleteCells(lo, hi)
+		}
+		verb := "copied"
+		if name == "cut" {
+			verb = "cut"
+		}
+		label := "cell"
+		if hi > lo {
+			label = fmt.Sprintf("%d cells", hi-lo+1)
+		}
+		return tea.Batch(tea.SetClipboard(src), m.setStatus(statusInfo, "%s %s", label, verb))
 	case "paste":
-		if m.clipboard != nil {
-			m.insertCell(m.sel+1, m.clipboard.clone())
-			m.mode = modeCommand
+		if len(m.clipboard) > 0 {
+			var cs []*Cell
+			for _, c := range m.clipboard {
+				cs = append(cs, c.clone())
+			}
+			m.insertCells(hi+1, cs)
+			m.anchor, m.sel = hi+1, hi+len(cs)
+			if len(cs) == 1 {
+				m.collapse()
+			}
 		}
 	case "move_up":
-		if m.sel > 0 {
-			m.cells[m.sel], m.cells[m.sel-1] = m.cells[m.sel-1], m.cells[m.sel]
-			m.sel--
-			m.dirty = true
-		}
+		m.moveBlock(lo, hi, -1)
 	case "move_down":
-		if m.sel < len(m.cells)-1 {
-			m.cells[m.sel], m.cells[m.sel+1] = m.cells[m.sel+1], m.cells[m.sel]
-			m.sel++
-			m.dirty = true
+		m.moveBlock(lo, hi, 1)
+	case "to_markdown", "to_code":
+		kind := notebook.Markdown
+		if name == "to_code" {
+			kind = notebook.Code
+		}
+		for i := lo; i <= hi; i++ {
+			m.setCellKind(i, kind)
 		}
 	case "to_raw":
 		return m.doAction(action{kind: actToRaw, cell: m.sel})
@@ -832,14 +862,12 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 		return m.doAction(action{kind: actExtEdit, cell: m.sel})
 	case "copy_output":
 		return m.doAction(action{kind: actCopyOutput, cell: m.sel})
-	case "to_markdown":
-		m.convertCell(m.sel, notebook.Markdown)
-	case "to_code":
-		m.convertCell(m.sel, notebook.Code)
 	case "toggle_output":
 		m.cur().expanded = !m.cur().expanded
 	case "clear_output":
-		m.clearCellOutput(m.cur())
+		for _, c := range m.cells[lo : hi+1] {
+			m.clearCellOutput(c)
+		}
 	case "clear_all_output":
 		return m.clearAllOutputs()
 	case "run_all":
@@ -875,16 +903,20 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 
 // convertCell switches kind, keeping mode and selection. Running cells keep their kind.
 func (m *Model) convertCell(i int, kind notebook.CellType) {
+	m.setCellKind(i, kind)
+	m.sel = i
+}
+
+func (m *Model) setCellKind(i int, kind notebook.CellType) {
 	c := m.cells[i]
 	if c.kind == kind {
 		return
 	}
-	if m.running != nil && m.running.cellID == c.id {
+	if m.cellBusy(c) {
 		return
 	}
 	c.setKind(kind)
 	c.mdOut = ""
-	m.sel = i
 	m.dirty = true
 }
 
@@ -897,27 +929,22 @@ func (m *Model) insertCell(i int, c *Cell) {
 	m.vim.mode = vimInsert
 }
 
-func (m *Model) deleteCell(i int) {
-	c := m.cells[i]
-	m.trash = append(m.trash, trashed{cell: c, index: i})
-	m.cells = append(m.cells[:i], m.cells[i+1:]...)
-	if len(m.cells) == 0 {
-		m.cells = []*Cell{newCell(notebook.Code, "")}
-	}
-	m.sel = clamp(m.sel, 0, len(m.cells)-1)
-	m.dirty = true
-}
+func (m *Model) deleteCell(i int) { m.deleteCells(i, i) }
 
 // runSelected executes (or renders, for markdown) the selected cell.
 func (m *Model) runSelected(advance, insert bool) tea.Cmd {
-	c := m.cur()
-	var cmd tea.Cmd
-	if c.kind == notebook.Code {
-		cmd = m.enqueue(c)
-	} else {
-		c.mdOut = ""
+	lo, hi := m.selRange()
+	var cmds []tea.Cmd
+	for _, c := range m.cells[lo : hi+1] {
+		if c.kind == notebook.Code {
+			cmds = append(cmds, m.enqueue(c))
+		} else {
+			c.mdOut = ""
+		}
 	}
 	m.leaveEdit()
+	m.collapse()
+	m.sel = hi
 	switch {
 	case insert:
 		m.insertCell(m.sel+1, newCell(notebook.Code, ""))
@@ -928,7 +955,7 @@ func (m *Model) runSelected(advance, insert bool) tea.Cmd {
 			m.sel++
 		}
 	}
-	return cmd
+	return tea.Batch(cmds...)
 }
 
 func (m *Model) runAll() tea.Cmd {
