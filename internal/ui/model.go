@@ -113,7 +113,8 @@ type Options struct {
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	k *kernel.Kernel
+	extEdit struct{ cellID, path, orig string }
+	k       *kernel.Kernel
 
 	completer   Completer
 	comp        completionState
@@ -322,6 +323,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.handleOllamaModels(msg)
 		return m, nil
 
+	case editorDoneMsg:
+		return m, m.finishExternalEdit(msg)
 	case runEventsMsg:
 		return m, m.handleRunEvents(msg)
 
@@ -474,6 +477,10 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.runSelected(false, false)
 	case key.Matches(msg, k.RunInsert):
 		return m.runSelected(false, true)
+	case key.Matches(msg, k.RestartClear):
+		return m.doAction(action{kind: actRestartClear})
+	case key.Matches(msg, k.SaveAs):
+		return m.doAction(action{kind: actSaveAs})
 	case key.Matches(msg, k.Save):
 		return m.saveCmd()
 	case key.Matches(msg, k.Interrupt):
@@ -599,7 +606,11 @@ func (m *Model) handleEditKey(msg tea.KeyPressMsg) tea.Cmd {
 	case "ctrl+x":
 		return m.doAction(action{kind: actCutText, cell: m.sel})
 	case "ctrl+t":
-		m.convertCell(m.sel, c.kind != notebook.Code)
+		to := notebook.Code
+		if c.kind == notebook.Code {
+			to = notebook.Markdown
+		}
+		m.convertCell(m.sel, to)
 	case "alt+a", "ctrl+shift+a":
 		ed.SelectAll()
 	case "alt+backspace", "ctrl+w", "ctrl+backspace":
@@ -703,6 +714,10 @@ func (m *Model) enterEdit() {
 	}
 	m.mode = modeEdit
 	c := m.cur()
+	if c.inputHidden() {
+		c.setInputHidden(false)
+		m.dirty = true
+	}
 	c.mdOut = "" // re-render markdown after editing
 }
 
@@ -811,9 +826,25 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 	case "move_down":
 		m.moveBlock(lo, hi, 1)
 	case "to_markdown", "to_code":
-		for i := lo; i <= hi; i++ {
-			m.setCellKind(i, name == "to_code")
+		kind := notebook.Markdown
+		if name == "to_code" {
+			kind = notebook.Code
 		}
+		for i := lo; i <= hi; i++ {
+			m.setCellKind(i, kind)
+		}
+	case "to_raw":
+		return m.doAction(action{kind: actToRaw, cell: m.sel})
+	case "toggle_input":
+		return m.doAction(action{kind: actToggleInput, cell: m.sel})
+	case "scroll_output_left":
+		return m.doAction(action{kind: actScrollOutLeft, cell: m.sel})
+	case "scroll_output_right":
+		return m.doAction(action{kind: actScrollOutRight, cell: m.sel})
+	case "external_edit":
+		return m.doAction(action{kind: actExtEdit, cell: m.sel})
+	case "copy_output":
+		return m.doAction(action{kind: actCopyOutput, cell: m.sel})
 	case "toggle_output":
 		m.cur().expanded = !m.cur().expanded
 	case "clear_output":
@@ -853,19 +884,14 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 	return nil
 }
 
-// convertCell switches a cell between code and markdown, keeping the
-// current mode and selection.
-func (m *Model) convertCell(i int, toCode bool) {
-	m.setCellKind(i, toCode)
+// convertCell switches kind, keeping mode and selection. Running cells keep their kind.
+func (m *Model) convertCell(i int, kind notebook.CellType) {
+	m.setCellKind(i, kind)
 	m.sel = i
 }
 
-func (m *Model) setCellKind(i int, toCode bool) {
+func (m *Model) setCellKind(i int, kind notebook.CellType) {
 	c := m.cells[i]
-	kind := notebook.Markdown
-	if toCode {
-		kind = notebook.Code
-	}
 	if c.kind == kind {
 		return
 	}
@@ -963,6 +989,7 @@ func (m *Model) startNext() tea.Cmd {
 		c.errMsg = ""
 		c.started = time.Now()
 		c.expanded = false
+		c.scrollX = 0
 		m.dirty = true
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -1084,6 +1111,15 @@ func (m *Model) clearCellOutput(c *Cell) {
 // Outputs". Cells that are still running keep theirs. It reports how many
 // cells were cleared.
 func (m *Model) clearAllOutputs() tea.Cmd {
+	n := m.clearOutputs()
+	if n == 0 {
+		return nil
+	}
+	return m.setStatus(statusInfo, "outputs cleared · %d cells", n)
+}
+
+// clearOutputs clears idle cells and returns the number changed.
+func (m *Model) clearOutputs() int {
 	n := 0
 	for _, c := range m.cells {
 		if c.status == statusRunning {
@@ -1095,10 +1131,7 @@ func (m *Model) clearAllOutputs() tea.Cmd {
 		m.clearCellOutput(c)
 		n++
 	}
-	if n == 0 {
-		return nil
-	}
-	return m.setStatus(statusInfo, "outputs cleared · %d cells", n)
+	return n
 }
 
 // hasOutputs reports whether any idle cell holds output or a run count, so
@@ -1159,7 +1192,7 @@ func (m *Model) save() error {
 func (m *Model) openSaveAs() tea.Cmd {
 	m.input.Placeholder = "notebook.ipynb"
 	m.input.SetWidth(40)
-	m.input.SetValue("")
+	m.input.SetValue(m.path)
 	return m.openDialog(overlaySaveAs)
 }
 

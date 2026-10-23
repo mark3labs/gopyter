@@ -6,6 +6,9 @@ import (
 )
 
 type keyMap struct {
+	RestartClear, SaveAs                                             key.Binding
+	ToRaw, ToggleInput, ScrollLeft, ScrollRight, ExtEdit, CopyOutput key.Binding
+
 	// Both modes
 	RunAdvance key.Binding
 	Run        key.Binding
@@ -58,12 +61,20 @@ func newKeyMap() keyMap {
 		return key.NewBinding(key.WithKeys(keys...), key.WithHelp(k, desc))
 	}
 	return keyMap{
-		RunAdvance: b([]string{"shift+enter", "ctrl+r"}, "⇧↵/^r", "run & next"),
-		Run:        b([]string{"ctrl+enter", "ctrl+j"}, "^↵", "run"),
-		RunInsert:  b([]string{"alt+enter"}, "alt+↵", "run & insert"),
-		Save:       b([]string{"ctrl+s"}, "^s", "save"),
-		Interrupt:  b([]string{"ctrl+c"}, "^c", "interrupt"),
-		Input:      b([]string{"alt+i"}, "alt+i", "input line"),
+		ToRaw:        b([]string{"r"}, "r", "to raw"),
+		ToggleInput:  b([]string{"I"}, "I", "hide/show input"),
+		ScrollLeft:   b([]string{"<"}, "<", "scroll output left"),
+		ScrollRight:  b([]string{">"}, ">", "scroll output right"),
+		ExtEdit:      b([]string{"E"}, "E", "edit in $EDITOR"),
+		CopyOutput:   b([]string{"C"}, "C", "copy output"),
+		RestartClear: b([]string{"alt+r"}, "alt+r", "restart & clear"),
+		SaveAs:       b([]string{"alt+s"}, "alt+s", "save as…"),
+		RunAdvance:   b([]string{"shift+enter", "ctrl+r"}, "⇧↵/^r", "run & next"),
+		Run:          b([]string{"ctrl+enter", "ctrl+j"}, "^↵", "run"),
+		RunInsert:    b([]string{"alt+enter"}, "alt+↵", "run & insert"),
+		Save:         b([]string{"ctrl+s"}, "^s", "save"),
+		Interrupt:    b([]string{"ctrl+c"}, "^c", "interrupt"),
+		Input:        b([]string{"alt+i"}, "alt+i", "input line"),
 		// Widgets: enter on the running cell focuses them, ⇥ moves.
 
 		ExtendUp:       b([]string{"alt+up"}, "alt+↑/↓", "extend selection"),
@@ -222,12 +233,13 @@ func (k keyMap) baseHelp() []helpSection {
 		// The widget keys (←/→, ⇥...) are in the footer while one has the
 		// focus.
 		{"Running", []key.Binding{
-			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart,
+			k.RunAdvance, k.Run, k.RunInsert, k.RunAll, k.Interrupt, k.Restart, k.RestartClear,
 			widgets, k.Input, hint("^d", "done (input)"),
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.ExtendUp, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
-		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},
+		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Theme, k.ToggleVim, k.Help, k.Quit}},
+		{"Cell", []key.Binding{k.ToRaw, k.ToggleInput, k.ScrollLeft, k.ScrollRight, k.ExtEdit, k.CopyOutput}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
 			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "format Go code")),
