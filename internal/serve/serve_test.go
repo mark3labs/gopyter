@@ -47,7 +47,11 @@ func TestResolve(t *testing.T) {
 	if err := os.Symlink(root, link); err != nil {
 		t.Fatal(err)
 	}
-	if p, err := Resolve(link, "a.ipynb"); err != nil || p != filepath.Join(root, "a.ipynb") {
+	canonicalRoot, err := Root(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := Resolve(link, "a.ipynb"); err != nil || p != filepath.Join(canonicalRoot, "a.ipynb") {
 		t.Fatalf("symlink root: %s %v", p, err)
 	}
 }
