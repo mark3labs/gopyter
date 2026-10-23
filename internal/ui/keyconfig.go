@@ -71,6 +71,7 @@ var keyCommands = []keyCommand{
 	{"restart", bindCommand, func(k *keyMap) *key.Binding { return &k.Restart }},
 	{"help", bindCommand, func(k *keyMap) *key.Binding { return &k.Help }},
 	{"theme", bindCommand, func(k *keyMap) *key.Binding { return &k.Theme }},
+	{"sidebar", bindCommand, func(k *keyMap) *key.Binding { return &k.Sidebar }},
 	{"toggle_vim", bindCommand, func(k *keyMap) *key.Binding { return &k.ToggleVim }},
 	{"fix", bindCommand, func(k *keyMap) *key.Binding { return &k.Fix }},
 	{"ask", bindCommand, func(k *keyMap) *key.Binding { return &k.Ask }},

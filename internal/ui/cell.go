@@ -9,6 +9,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/htmlview"
+	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
@@ -45,6 +46,8 @@ type Cell struct {
 	// execution count may come from the saved notebook instead.
 	ran bool
 
+	toc          []markdown.Heading
+	tocSrc       string
 	mdSrc, mdOut string
 	mdWidth      int
 

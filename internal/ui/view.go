@@ -32,7 +32,7 @@ func (m *Model) viewHeight() int { return max(m.height-headerHeight-footerHeight
 // minus its borders (renderCell). Shell commands run in a terminal of
 // this width, so programs wrap where the output is shown.
 func (m *Model) outWidth() int {
-	return m.width - 1 - cellMarginR - gutterWidth - 2
+	return m.bodyWidth() - 1 - cellMarginR - gutterWidth - 2
 }
 
 func (m *Model) View() tea.View {
@@ -178,6 +178,7 @@ func (m *Model) renderToolbar() string {
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
 		{act: action{kind: actSave}, full: "save", short: "save", tip: withKey("save the notebook", m.keys.Save), enabled: true},
+		{act: action{kind: actToggleSidebar}, full: "☰ sidebar", short: "☰", tip: withKey("contents and variables", m.keys.Sidebar), enabled: true},
 		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: !m.themes.fixed},
 		{act: action{kind: actHelp}, full: "? help", short: "?", tip: withKey("keyboard shortcuts", m.keys.Help), enabled: true},
 	}
@@ -245,6 +246,9 @@ func (m *Model) renderFooter() string {
 			pill = st.Render(m.vim.mode.String())
 		}
 	}
+	if m.mode == modeCommand && m.side.focused && m.sidebarWidth() > 0 {
+		bindings = m.keys.sidebarShort()
+	}
 	toggle := action{kind: actToggleMode}
 	if m.hovered(toggle) {
 		pill = t.btnHover.Render(ansi.Strip(pill))
@@ -300,7 +304,7 @@ func (m *Model) renderFooter() string {
 
 // renderBody renders the scrollable list of cells and computes the cursor.
 func (m *Model) renderBody() (string, *tea.Cursor) {
-	w := m.width - 1 // leave room for the scrollbar
+	w := m.bodyWidth() - 1 // leave room for the scrollbar
 	vh := m.viewHeight()
 
 	var all []string
@@ -397,6 +401,13 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 		out[y] = line
 	}
 
+	if m.sidebarWidth() > 0 {
+		side, zs := m.renderSidebar(vh)
+		for y := range out {
+			out[y] += side[y]
+		}
+		m.zones = append(m.zones, translate(zs, m.bodyWidth(), headerHeight)...)
+	}
 	var cursor *tea.Cursor
 	if m.mode == modeEdit && m.sel < len(m.layout) {
 		l := m.layout[m.sel]

@@ -312,12 +312,19 @@ mode** (green) edits text. Press `?` for the full list.
 | `alt+shift+f`                | format the selected Go cell with gofmt    |
 | `o` / `O`                    | fold long output / clear output          |
 | `D`                          | clear every cell's output                |
+| `ctrl+b`                     | sidebar: contents and variables (`tab` switches) |
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
 | `V`                          | turn vim bindings on / off (saved)       |
 | `M`                          | pick the AI model, or turn AI on / off   |
 | `e`                          | ask AI to write or change a cell (when AI is on) |
 | `f`                          | fix a failing cell with AI (when AI is on) |
+
+The sidebar starts hidden. **Contents** lists markdown headings (levels 1–3);
+**Variables** shows persisted declarations with types and one-line value previews
+from the last saving run. `tab` switches panels, arrows move, `enter` jumps to
+the declaring cell, and `esc` returns focus to the notebook. It automatically
+hides in narrow terminals and returns when there is room again.
 
 Run, delete, cut/copy/paste, move, convert and clear-output commands apply to
 every selected cell. Other cell commands use the cursor cell. `esc`, navigation,
@@ -350,7 +357,7 @@ cursor, or of the enclosing call when the cursor is among its arguments;
 
 ### Custom keys
 
-The table above lists defaults. Run `gopyter keys` to list all 40 command names,
+The table above lists defaults. Run `gopyter keys` to list all 41 command names,
 current keys, defaults and descriptions (`*` marks configured commands).
 Add a `keys` object to [config.json](#themes):
 
@@ -420,6 +427,9 @@ its output until it finishes, just like clearing outputs with `D`. Save-as
 moves file watching to the new path, but does not move the kernel's run directory.
 
 ## Mouse
+
+Click the sidebar's panel headers to switch panels, or an entry to jump to its
+cell. The wheel over the sidebar scrolls its list independently of the notebook.
 
 Click a cell to edit it, and drag, double-click or triple-click to select text.
 Click a hidden-input placeholder to show the source. Under unwrapped text output,
@@ -584,6 +594,9 @@ Reloading doesn't reset the kernel, so declarations from cells you already ran
 stay in effect. External edits to cell text can be undone.
 
 ## Acknowledgements
+
+The Contents and Variables sidebar is inspired by
+[euporie](https://github.com/joouha/euporie) (behavior, not code).
 
 Multi-cell selection, merge and cursor split follow
 [euporie](https://github.com/joouha/euporie)'s notebook operations.

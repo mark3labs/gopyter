@@ -118,6 +118,7 @@ type Model struct {
 
 	completer   Completer
 	comp        completionState
+	side        sidebarState
 	diag        diagState
 	info        infoState
 	ai          *AIConfig // nil: no AI support at all
@@ -128,12 +129,12 @@ type Model struct {
 	picker      modelPicker
 	vim         vimState
 	path        string
-	resolvePath func(string) (string, error)
 	meta        map[string]any
 	cells       []*Cell
 	sel         int
 	anchor      int // other end of the command-mode range; -1 for a single cell
 	mode        mode
+	resolvePath func(string) (string, error)
 
 	width, height int
 	offset        int
@@ -514,6 +515,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.requestQuit()
 	}
 
+	if m.mode == modeCommand && m.side.focused && m.sidebarWidth() > 0 {
+		if cmd, ok := m.handleSidebarKey(msg); ok {
+			return cmd
+		}
+	}
 	if m.vimActive() {
 		m.closeCompletion()
 		return m.handleVimKey(msg)
@@ -723,6 +729,7 @@ func (m *Model) leaveEdit() {
 // enterEdit switches to edit mode. With vim bindings, entering from
 // command mode starts in normal mode; moving between cells keeps the mode.
 func (m *Model) enterEdit() {
+	m.side.focused = false
 	m.collapse()
 	if m.mode != modeEdit && m.vim.enabled {
 		m.vim.reset()
@@ -895,6 +902,8 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 			return nil
 		}
 		return m.openModelPicker()
+	case "sidebar":
+		return m.toggleSidebar()
 	case "quit":
 		return m.requestQuit()
 	}
@@ -1085,6 +1094,7 @@ func (m *Model) handleRunEvents(msg runEventsMsg) tea.Cmd {
 	}
 
 	m.running = nil
+	m.refreshVars()
 	m.in.stop()
 	if c != nil {
 		c.duration = time.Since(c.started)
@@ -1182,6 +1192,7 @@ func (m *Model) interrupt() tea.Cmd {
 func (m *Model) restart() tea.Cmd {
 	m.interrupt()
 	err := m.k.Reset()
+	m.refreshVars()
 	m.counter = 0
 	for _, c := range m.cells {
 		c.ran = false
