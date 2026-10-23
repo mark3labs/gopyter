@@ -20,6 +20,8 @@ import (
 
 // Settings are the persisted user preferences.
 type Settings struct {
+	// Graphics selects auto (default), kitty or blocks image drawing.
+	Graphics string `json:"graphics,omitempty"`
 	// Keys replaces command defaults; empty lists unbind commands.
 	Keys map[string][]string `json:"keys,omitempty"`
 	// Theme is the name of the UI color theme.

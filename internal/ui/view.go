@@ -55,6 +55,7 @@ func (m *Model) View() tea.View {
 			screen, cursor = m.renderScreen()
 		}
 	}
+	m.sweepImages()
 	v.SetContent(screen)
 	v.Cursor = cursor
 	return v
@@ -462,6 +463,9 @@ func (m *Model) renderMarkdownPanel(src string, boxW int) string {
 func (m *Model) renderCell(i, width int) cellRender {
 	t := m.theme
 	c := m.cells[i]
+	if c.kind != notebook.Code {
+		c.images = nil
+	}
 	selected := m.inRange(i)
 	editing := i == m.sel && m.mode == modeEdit
 
@@ -663,6 +667,7 @@ func (m *Model) cellOutputs(i, boxW int, bar, blank string) ([]string, []zone) {
 	t := m.theme
 	c := m.cells[i]
 	if c.kind != notebook.Code || len(c.outputs) == 0 {
+		c.images = nil
 		return nil, nil
 	}
 	live := m.liveWidgets(c)
@@ -670,7 +675,9 @@ func (m *Model) cellOutputs(i, boxW int, bar, blank string) ([]string, []zone) {
 	if live {
 		focus = m.in.focus
 	}
-	if key := c.outputFingerprint(boxW-2, focus, live); key != c.outKey || c.outLines == nil {
+	key := c.outputFingerprint(boxW-2, focus, live)
+	key.gfx = m.gfxGen
+	if key != c.outKey || c.outLines == nil {
 		c.outLines, c.outResultAt, c.outWidgets = m.renderOutputs(c, boxW-2, live, focus)
 		c.outKey = key
 	}
@@ -892,6 +899,11 @@ const noWrapWidth = 1 << 14
 // in the lines. live widgets are interactive, focus is focused.
 func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]string, int, []htmlview.Widget) {
 	t := m.theme
+	var d termimg.Drawer
+	c.images = c.images[:0]
+	if m.gfx != nil {
+		d = m.gfx.Track(&c.images)
+	}
 	var out []string
 	var widgets []htmlview.Widget
 	resultAt := -1
@@ -916,7 +928,7 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 		switch o.Kind {
 		case notebook.HTMLOut:
 			lines, ws := htmlview.Render(o.Text, htmlview.Options{
-				Width: width, Styles: m.htmlStyles, Live: live, Focus: focus, MaxImageLines: maxOutputLines - 8,
+				Width: width, Styles: m.htmlStyles, Live: live, Focus: focus, MaxImageLines: maxOutputLines - 8, Images: d,
 			})
 			for _, w := range ws {
 				w.Line += len(out)
@@ -940,7 +952,7 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 				continue
 			}
 			// Leave room for some other output before the output folds.
-			out = append(out, termimg.Render(img, width, maxOutputLines-8)...)
+			out = append(out, termimg.Draw(d, img, o.Text, width, maxOutputLines-8)...)
 		case notebook.Info:
 			for _, l := range wrapLines(normalizeOutput(o.Text), width-2) {
 				out = append(out, t.info.Render("› "+l))
@@ -1151,7 +1163,7 @@ func (m *Model) composite(base, layer string, x, y int, dim bool) string {
 		for yy := range h {
 			for xx := range w {
 				c := buf.CellAt(xx, yy)
-				if c == nil || c.Width == 0 {
+				if c == nil || c.Width == 0 || strings.HasPrefix(c.Content, string(termimg.Placeholder)) {
 					continue
 				}
 				nc := *c

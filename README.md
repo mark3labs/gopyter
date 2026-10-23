@@ -159,7 +159,8 @@ declare them itself, so a notebook can have its own `Display`.
 
 - Images are drawn in the output: `nb.Display` an `image.Image` (or end the
   cell with one), or pass PNG bytes to `nb.DisplayPNG(data)`. They are drawn with
-  colored half blocks (two pixels per character), scaled to fit the cell, and
+  the Kitty graphics protocol on kitty and Ghostty, or colored half blocks
+  (two pixels per character) elsewhere, scaled to fit the cell, and
   saved in the notebook as `image/png`, so Jupyter shows them too. Images in
   notebooks from Jupyter (PNG, JPEG, GIF) are shown as well. `gopyter run`
   draws them when its output is a color terminal and prints `[image WxH]`
@@ -464,6 +465,23 @@ gopyter --theme dracula notes.ipynb  # use a theme for this session only
 gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
 ```
 
+## Images
+
+`--graphics=auto` (the default) detects kitty and Ghostty from the environment,
+without terminal queries. `--graphics=kitty` forces Unicode-placeholder images;
+`--graphics=blocks` always uses portable half blocks. Both the TUI and
+`gopyter run` accept the flag. The saved default can be set in the settings file:
+
+```json
+{ "graphics": "blocks" }
+```
+
+Kitty graphics needs at least 256 colors. In tmux (3.3+), enable passthrough
+with `set -g allow-passthrough on`; otherwise auto falls back to blocks and a
+forced kitty request warns. WezTerm is not auto-detected because its Kitty
+support does not yet include Unicode placeholders. Images scroll and clip like
+text, and menus cover them normally (images themselves are not dimmed).
+
 ## AI (optional)
 
 AI features are off, and invisible, until you choose a model. gopyter uses
@@ -525,6 +543,9 @@ gopyter format notes.ipynb         # format code cells in place, without running
 ```
 
 It exits non-zero if any cell fails, so it works as a CI check for notebooks.
+On kitty/Ghostty, images use Kitty graphics, with the same `--graphics` override
+as the TUI. Graphics commands are never written to redirected output, even when
+colors are forced; it keeps half blocks or `[image WxH]` descriptions.
 On a terminal, outputs that update (`nb.DisplayID`, `gonbui.UpdateHTML`, DOM
 changes) are redrawn in place. When the output isn't a terminal, they're
 printed once, in their final state, when the cell ends, so logs don't get a
@@ -624,6 +645,10 @@ kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):
 gopyter's own parts (the terminal UI, drawing images, HTML and widgets as text,
 the `nb` package, variables kept across cells, completion, AI) are separate
 work. To run Go notebooks in Jupyter itself, use GoNB.
+
+The Kitty Unicode-placeholder image approach is borrowed from
+[euporie](https://github.com/joouha/euporie): transmit once, place virtually,
+and let ordinary text cells handle scrolling, clipping and compositing.
 
 The SSH notebook server model is borrowed from
 [euporie-hub in euporie](https://github.com/joouha/euporie).

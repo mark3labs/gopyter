@@ -26,7 +26,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/runner`   | headless execution for `gopyter run`                                      |
 | `internal/markdown` | renders markdown with herald-md in the palette's colors, wrapped to a width (cells, outputs, info popup, `run`) |
 | `internal/palette`  | default dark and light colors shared by the UI and runner               |
-| `internal/termimg`  | draws images as half-block text for image outputs (TUI and `run`)        |
+| `internal/termimg`  | draws images as half blocks or Kitty Unicode placeholders (TUI and `run`)        |
 | `internal/htmlview` | draws HTML outputs as text with widgets; applies the program's DOM/widget ops (`Session`) |
 | `internal/kernel/runtime` | packages cell programs import: `nb` (gopyter's API) and the GoNB shim (`gonbui`, `widgets`, `comms`, `dom`, `protocol`, adapted from GoNB under its MIT license); stdlib only |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
@@ -188,6 +188,13 @@ concatenation in WriteString") count as issues to fix too.
 - Overlays (dialogs, the context menu, the completion popup) are composited
   with Ultraviolet in `composite`. While an overlay is open, only its zones
   are interactive.
+- Kitty images (`graphics.go`): View queues transmission/placement and sweeps
+  references with `Retain` (including deleted cells and saved merge outputs in
+  cell undo history). A coalesced asynchronous
+  `graphicsMsg` lets Update emit `tea.Raw` outside the styled frame. Pixel cell
+  size changes invalidate output caches; theme changes reuse image keys.
+  `composite` must exempt placeholders from backdrop dimming: their foreground
+  color is an image ID, not a decorative color.
 - The editor (`editor.go`) is custom rather than `bubbles/textarea`. Edits go
   through `push()` for undo, and selection-aware operations must handle
   `HasSelection()`.

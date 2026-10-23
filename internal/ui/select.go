@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 func (m *Model) selRange() (int, int) {
@@ -85,6 +86,7 @@ type cellUndo struct {
 	target                *Cell
 	src                   string
 	outputs               []notebook.Output
+	images                []termimg.Key // saved target outputs for merge undo
 	count                 int
 	status                cellStatus
 	errMsg                string
@@ -219,7 +221,7 @@ func (m *Model) mergeCells() tea.Cmd {
 		}
 	}
 	c := m.cells[lo]
-	m.pushCellUndo(cellUndo{kind: undoMerge, cells: slices.Clone(m.cells[lo+1 : hi+1]), index: lo + 1, target: c, src: c.ed.Value(), outputs: c.outputs, count: c.count, status: c.status, errMsg: c.errMsg, ran: c.ran})
+	m.pushCellUndo(cellUndo{kind: undoMerge, cells: slices.Clone(m.cells[lo+1 : hi+1]), index: lo + 1, target: c, src: c.ed.Value(), outputs: c.outputs, images: slices.Clone(c.images), count: c.count, status: c.status, errMsg: c.errMsg, ran: c.ran})
 	c.ed.SetValue(mergedSource(c.kind, m.cells[lo:hi+1]))
 	c.ed.breakUndo()
 	m.clearCellOutput(c)

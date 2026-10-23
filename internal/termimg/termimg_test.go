@@ -89,8 +89,8 @@ func TestDecode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if Placeholder(got) != "[image 4x5]" {
-		t.Fatalf("placeholder %q", Placeholder(got))
+	if Description(got) != "[image 4x5]" {
+		t.Fatalf("placeholder %q", Description(got))
 	}
 	if _, err := Decode("not an image"); err == nil {
 		t.Fatal("expected an error")

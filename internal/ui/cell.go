@@ -11,6 +11,7 @@ import (
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 type cellStatus int
@@ -51,6 +52,7 @@ type Cell struct {
 	mdSrc, mdOut string
 	mdWidth      int
 
+	images      []termimg.Key // referenced by cached output lines
 	outKey      outputKey
 	outLines    []string
 	outResultAt int
@@ -63,6 +65,7 @@ type Cell struct {
 // outputKey fingerprints the outputs, and how their widgets are drawn.
 type outputKey struct {
 	width, n, last, rev int
+	gfx                 int
 	kind                notebook.OutputKind
 	focus               string
 	live                bool
