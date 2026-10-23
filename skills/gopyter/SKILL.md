@@ -37,6 +37,7 @@ go version            # required: cells are built with the Go toolchain on PATH
 | `gopyter run file.ipynb --save` | also write outputs and execution counts into the file |
 | `gopyter run file.ipynb --fail-fast` | stop at the first failing cell |
 | `gopyter format file.ipynb` | format Go code cells in place without execution; preserve commands, metadata and outputs; leave the file unchanged on syntax errors |
+| `--graphics auto\|kitty\|blocks` | choose image drawing for the TUI or `run`; auto detects kitty/Ghostty, redirected output stays text |
 | `--workdir DIR` | keep the kernel workspace (a Go module) in `DIR` instead of a temporary directory |
 | `gopyter themes`, `gopyter model` | list themes / show or set the optional AI model (TUI features) |
 

@@ -13,6 +13,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/markdown"
@@ -62,15 +63,15 @@ func renderMarkdown(s string) string {
 }
 
 // renderImage draws a base64 image, or describes it when draw is false.
-func renderImage(b64 string, draw bool) string {
+func renderImage(b64 string, draw bool, d termimg.Drawer) string {
 	img, err := termimg.Decode(b64)
 	if err != nil {
 		return errStyle.Render("can't show image: " + err.Error())
 	}
 	if !draw {
-		return resultStyle.Render("=> " + termimg.Placeholder(img))
+		return resultStyle.Render("=> " + termimg.Description(img))
 	}
-	return strings.Join(termimg.Render(img, 100, 40), "\n")
+	return strings.Join(termimg.Draw(d, img, b64, 100, 40), "\n")
 }
 
 // htmlStyles draw HTML outputs; widgets are drawn inactive.
@@ -86,8 +87,8 @@ var htmlStyles = htmlview.Styles{
 	Accent:      labelStyle,
 }
 
-func renderHTML(s string, tty bool) string {
-	lines, _ := htmlview.Render(s, htmlview.Options{Width: 100, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty})
+func renderHTML(s string, tty bool, d termimg.Drawer) string {
+	lines, _ := htmlview.Render(s, htmlview.Options{Width: 100, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty, Images: d})
 	return strings.Join(lines, "\n")
 }
 
@@ -132,6 +133,26 @@ func (e *events) close() {
 // printing them to w. Programs read stdin (nil for no input). It returns
 // the number of failed cells.
 func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writer, stdin io.Reader, failFast bool) int {
+	return RunWith(ctx, k, nb, w, stdin, Options{FailFast: failFast})
+}
+
+// Options configures headless execution.
+type Options struct {
+	FailFast bool
+	Graphics *termimg.Kitty
+}
+
+// RunWith executes a notebook with optional full-resolution image drawing.
+func RunWith(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writer, stdin io.Reader, opts Options) int {
+	gfx := opts.Graphics
+	if f, ok := w.(*os.File); !ok || !term.IsTerminal(f.Fd()) {
+		gfx = nil
+	} else if gfx != nil {
+		cw, ch := termimg.CellSize(f)
+		gfx.SetCellSize(cw, ch)
+	}
+	// Retain scrollback images across cells as well as within a cell.
+	var scrollback []termimg.Key
 	// Images are drawn with colored half blocks, which are noise without
 	// colors (e.g. when the output is redirected to a file). The same goes
 	// for redrawing DisplayID outputs in place.
@@ -159,6 +180,7 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 		// Program output that styles itself (escape codes) is passed
 		// through: write adapts its colors to w.
 		bl := newBlocks(w, tty)
+		bl.gfx, bl.savedImages = gfx, scrollback
 		rawOut := false
 		stream := func(st lipgloss.Style, text string) {
 			bl.other()
@@ -177,7 +199,7 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 				if r.Changed {
 					for i := range r.Outputs {
 						if r.Outputs[i].Text != c.Outputs[i].Text {
-							bl.show(outputKey(r.Outputs, i), renderOutput(r.Outputs[i], tty), r.Outputs[i].ID != "", false)
+							bl.showOutput(outputKey(r.Outputs, i), r.Outputs[i], r.Outputs[i].ID != "", false)
 						}
 					}
 					c.Outputs = r.Outputs
@@ -196,7 +218,7 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			case kernel.Stderr:
 				stream(stderrStyle, e.Text)
 			case kernel.Result, kernel.Markdown, kernel.Image, kernel.HTML:
-				bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], tty), e.ID != "", true)
+				bl.showOutput(outputKey(c.Outputs, i), c.Outputs[i], e.ID != "", true)
 			case kernel.Error:
 				bl.other()
 				writeln(w, paint(errStyle, e.Text))
@@ -207,13 +229,14 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 		})
 		ev.close()
 		bl.finish()
+		scrollback = bl.savedImages
 		if err != nil {
 			failed++
 			if !errors.Is(err, kernel.ErrCompile) {
 				appendOut(notebook.Error, err.Error(), "")
 			}
 			writeln(w, errStyle.Render("✗ "+err.Error()))
-			if failFast || errors.Is(err, kernel.ErrInterrupted) {
+			if opts.FailFast || errors.Is(err, kernel.ErrInterrupted) {
 				return failed
 			}
 		} else {

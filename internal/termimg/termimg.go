@@ -1,9 +1,9 @@
 // Package termimg draws images as text: each terminal cell shows two
 // vertically stacked pixels with the upper half block "▀" (foreground = top
 // pixel, background = bottom pixel). It works in any terminal with color
-// support and, unlike graphics protocols (kitty, sixel, iTerm2), the result
-// is ordinary styled text, so it scrolls, clips and composites with the rest
-// of the UI.
+// support. Kitty Unicode placeholders optionally preserve full pixel resolution
+// while remaining ordinary styled text that scrolls, clips and composites
+// with the rest of the UI.
 package termimg
 
 import (
@@ -96,8 +96,8 @@ func Render(img image.Image, maxCols, maxLines int) []string {
 	return lines
 }
 
-// Placeholder describes img in plain text, for outputs that can't show it.
-func Placeholder(img image.Image) string {
+// Description describes img in plain text, for outputs that can't show it.
+func Description(img image.Image) string {
 	b := img.Bounds()
 	return fmt.Sprintf("[image %dx%d]", b.Dx(), b.Dy())
 }

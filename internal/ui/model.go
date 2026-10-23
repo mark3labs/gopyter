@@ -20,6 +20,7 @@ import (
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/markdown"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 type mode int
@@ -76,6 +77,8 @@ type cellLayout struct {
 
 // Options configure the notebook UI.
 type Options struct {
+	// Graphics enables Kitty placeholders; nil draws half blocks.
+	Graphics *termimg.Kitty
 	Path     string
 	Notebook *notebook.Notebook
 	Kernel   *kernel.Kernel
@@ -101,7 +104,11 @@ type Options struct {
 
 // Model is the root Bubble Tea model.
 type Model struct {
-	k *kernel.Kernel
+	gfx            *termimg.Kitty
+	gfxGen         int
+	graphicsQueued bool
+	send           func(tea.Msg)
+	k              *kernel.Kernel
 
 	completer Completer
 	comp      completionState
@@ -187,7 +194,8 @@ func New(opts Options) *Model {
 		nb = notebook.New()
 	}
 	m := &Model{
-		k: opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
+		gfx: opts.Graphics,
+		k:   opts.Kernel, path: opts.Path, meta: nb.Metadata, completer: opts.Completer,
 		keys: newKeyMap(), follow: true, hoverCell: -1,
 	}
 	if opts.AI != nil {
@@ -262,8 +270,20 @@ func (m *Model) busy() bool { return m.running != nil || len(m.queue) > 0 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case graphicsMsg:
+		m.graphicsQueued = false
+		if m.gfx != nil {
+			return m, tea.Raw(m.gfx.Flush())
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		if m.gfx != nil {
+			w, h := termimg.CellSize(os.Stdout)
+			if m.gfx.SetCellSize(w, h) {
+				m.gfxGen++
+			}
+		}
 		return m, nil
 
 	case clearStatusMsg:
@@ -1121,6 +1141,10 @@ func (m *Model) quit() tea.Cmd {
 		m.task.cancel()
 	}
 	m.quitting = true
+	if m.gfx != nil {
+		m.gfx.DeleteAll()
+		return tea.Sequence(tea.Raw(m.gfx.Flush()), tea.Quit)
+	}
 	return tea.Quit
 }
 
@@ -1135,7 +1159,14 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}
 	}
-	_, err := tea.NewProgram(m, tea.WithContext(ctx), tea.WithFilter(m.filter)).Run()
+	p := tea.NewProgram(m, tea.WithContext(ctx), tea.WithFilter(m.filter))
+	m.send = p.Send
+	_, err := p.Run()
+	// Also release data on context cancellation or a program error.
+	if m.gfx != nil {
+		m.gfx.DeleteAll()
+		_, _ = os.Stdout.WriteString(m.gfx.Flush())
+	}
 	if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 		return nil
 	}

@@ -20,6 +20,8 @@ import (
 
 // Settings are the persisted user preferences.
 type Settings struct {
+	// Graphics selects auto (default), kitty or blocks image drawing.
+	Graphics string `json:"graphics,omitempty"`
 	// Theme is the name of the UI color theme.
 	Theme string `json:"theme,omitempty"`
 	// Vim enables vim key bindings in edit mode.

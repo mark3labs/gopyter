@@ -14,11 +14,14 @@ import (
 
 	"charm.land/fang/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/term"
 	"github.com/mark3labs/gopyter/internal/complete"
 	"github.com/mark3labs/gopyter/internal/config"
 	"github.com/mark3labs/gopyter/internal/kernel"
 	"github.com/mark3labs/gopyter/internal/notebook"
 	"github.com/mark3labs/gopyter/internal/runner"
+	"github.com/mark3labs/gopyter/internal/termimg"
 	"github.com/mark3labs/gopyter/internal/ui"
 	"github.com/spf13/cobra"
 )
@@ -56,6 +59,7 @@ func loadNotebook(path string) (*notebook.Notebook, error) {
 
 func rootCmd() *cobra.Command {
 	var (
+		graphics   string
 		workdir    string
 		theme      string
 		syntax     string
@@ -103,8 +107,13 @@ func rootCmd() *cobra.Command {
 			if !cmd.Flags().Changed("vim") {
 				vim = settings.Vim
 			}
+			gfx, err := resolveGraphics(cmd, graphics, settings)
+			if err != nil {
+				return err
+			}
 			opts := ui.Options{
-				Path: path, Notebook: nb, Kernel: k,
+				Graphics: gfx,
+				Path:     path, Notebook: nb, Kernel: k,
 				Vim: vim, SaveVim: saveVim,
 				Theme: name, SyntaxTheme: syntax, SaveTheme: saveTheme,
 				// Probe before the TUI takes over the terminal, so the
@@ -120,6 +129,7 @@ func rootCmd() *cobra.Command {
 			return ui.Run(cmd.Context(), opts)
 		},
 	}
+	cmd.PersistentFlags().StringVar(&graphics, "graphics", "", "how to draw images: auto, kitty or blocks; defaults to the saved setting")
 	cmd.PersistentFlags().StringVar(&workdir, "workdir", "", "persistent kernel workspace (Go module) directory; a temporary one is used by default")
 	cmd.Flags().StringVar(&theme, "theme", "", "color theme for this session (see 'gopyter themes'); the saved theme is used by default")
 	cmd.Flags().StringVar(&syntax, "syntax-theme", "", "chroma syntax highlighting style, overriding the theme's")
@@ -127,11 +137,11 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir), formatCmd(), themesCmd(), modelCmd())
+	cmd.AddCommand(runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd())
 	return cmd
 }
 
-func runCmd(workdir *string) *cobra.Command {
+func runCmd(workdir, graphics *string) *cobra.Command {
 	var (
 		save     bool
 		failFast bool
@@ -153,7 +163,14 @@ func runCmd(workdir *string) *cobra.Command {
 			if dir, err := os.Getwd(); err == nil {
 				k.RunDir = dir
 			}
-			failed := runner.Run(cmd.Context(), k, nb, cmd.OutOrStdout(), cmd.InOrStdin(), failFast)
+			gfx, err := resolveGraphics(cmd, *graphics, loadSettings(cmd))
+			if err != nil {
+				return err
+			}
+			if f, ok := cmd.OutOrStdout().(*os.File); !ok || !term.IsTerminal(f.Fd()) {
+				gfx = nil
+			}
+			failed := runner.RunWith(cmd.Context(), k, nb, cmd.OutOrStdout(), cmd.InOrStdin(), runner.Options{FailFast: failFast, Graphics: gfx})
 			if save {
 				if err := nb.Save(args[0]); err != nil {
 					return err
@@ -199,6 +216,33 @@ func resolveTheme(cmd *cobra.Command, flag string, s config.Settings) (string, e
 		return ui.DefaultTheme, nil
 	}
 	return s.Theme, nil
+}
+
+// resolveGraphics gives flags precedence over saved settings. Invalid saved
+// values warn rather than preventing startup; detection never reads stdin.
+func resolveGraphics(cmd *cobra.Command, flag string, s config.Settings) (*termimg.Kitty, error) {
+	value := flag
+	if value == "" {
+		value = s.Graphics
+	}
+	mode, err := termimg.ParseMode(value)
+	if err != nil {
+		if flag != "" {
+			return nil, err
+		}
+		cmd.PrintErrf("gopyter: %v; using auto\n", err)
+		mode = termimg.Auto
+	}
+	environ := os.Environ()
+	profile := colorprofile.Detect(os.Stdout, environ)
+	mode, tmux, warn := termimg.Resolve(mode, environ, profile)
+	if warn != "" {
+		cmd.PrintErrf("gopyter: %s\n", warn)
+	}
+	if mode != termimg.KittyMode {
+		return nil, nil
+	}
+	return termimg.NewKitty(tmux, profile < colorprofile.TrueColor), nil
 }
 
 // saveTheme persists the theme picked in the UI.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/notebook"
+	"github.com/mark3labs/gopyter/internal/termimg"
 )
 
 func plain(src string, width int) []string {
@@ -62,6 +63,10 @@ func TestRenderImage(t *testing.T) {
 	lines, _ := Render(`before<img src="data:image/png;base64,`+px+`">after`, Options{Width: 20, MaxImageLines: 4})
 	if len(lines) != 3 || !strings.Contains(lines[1], "▀") {
 		t.Fatalf("lines %q", lines)
+	}
+	kittyLines, _ := Render(`before<img src="data:image/png;base64,`+px+`">after`, Options{Width: 20, MaxImageLines: 4, Images: termimg.NewKitty(false, false)})
+	if len(kittyLines) != 3 || !strings.ContainsRune(kittyLines[1], termimg.Placeholder) || strings.Contains(kittyLines[1], "▀") || kittyLines[0] != lines[0] || kittyLines[2] != lines[2] {
+		t.Fatalf("kitty lines %q", kittyLines)
 	}
 	if got := Text(`<img src="data:image/png;base64,` + px + `">`); got != "[image 2x2]" {
 		t.Fatalf("text %q", got)

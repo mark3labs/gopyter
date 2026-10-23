@@ -78,6 +78,7 @@ func (m *Model) applyTheme(name string) {
 	}
 
 	// Rendered markdown and outputs are cached with their styles baked in.
+	// Kitty keys depend on data and size, not theme: rebuilding reuses images.
 	for _, c := range m.cells {
 		c.mdOut, c.outLines = "", nil
 	}

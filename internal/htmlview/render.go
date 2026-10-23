@@ -82,6 +82,8 @@ type Options struct {
 	MaxImageLines int
 	// NoImages describes images instead of drawing them, for plain text.
 	NoImages bool
+	// Images draws images; nil selects portable half blocks.
+	Images termimg.Drawer
 }
 
 // Render draws HTML in lines at most opt.Width wide.
@@ -310,10 +312,10 @@ func (r *renderer) image(n *html.Node) {
 	alt, _ := attr(n, "alt")
 	if b64, ok := dataURL(src); ok {
 		if img, err := termimg.Decode(b64); err == nil && r.opt.NoImages {
-			r.l.word(termimg.Placeholder(img), r.opt.Styles.Muted)
+			r.l.word(termimg.Description(img), r.opt.Styles.Muted)
 			return
 		} else if err == nil {
-			lines := termimg.Render(img, r.l.width-r.l.indent, max(r.opt.MaxImageLines, 1))
+			lines := termimg.Draw(r.opt.Images, img, b64, r.l.width-r.l.indent, max(r.opt.MaxImageLines, 1))
 			r.l.block()
 			pad := strings.Repeat(" ", r.l.indent)
 			for _, l := range lines {
