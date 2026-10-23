@@ -17,7 +17,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 
 | Package             | Responsibility                                                            |
 |---------------------|---------------------------------------------------------------------------|
-| `main.go` / `format.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
+| `main.go` / `format.go` / `keys.go` | cobra commands (`gopyter`, `gopyter run`, `gopyter model`, `gopyter format`, `gopyter themes`) executed through `fang`; AI wiring in `ai.go` / `ai_noai.go` |
 | `internal/kernel`   | splits cells into decls/statements, persists decls, generates, builds and runs programs; `Check` compiles a cell without running it |
 | `internal/ai`       | optional AI features on the kit SDK: model setting, isolated agents, the cell fix and edit loop |
 | `internal/config`   | user settings (theme, vim, AI model) persisted as JSON in the user config dir |
@@ -165,6 +165,10 @@ concatenation in WriteString") count as issues to fix too.
   positions map back exactly. Preserve that property.
 
 ### UI (`internal/ui`)
+
+- Each new `keyMap` field needs a `keyCommands` entry with a permanent config
+  name and mode. Use `withKey` for key text in tooltips and status hints;
+  mouse actions use `commandKey(cell, name)`, never synthetic default keys.
 
 - `Model` uses pointer receivers. `View()` intentionally records render-time
   layout: `m.layout` holds cell geometry and `m.zones` holds clickable

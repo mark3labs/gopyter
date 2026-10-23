@@ -168,17 +168,17 @@ func (m *Model) renderToolbar() string {
 	t := m.theme
 	rule := lipgloss.NewStyle().Foreground(colFaint)
 	items := []toolItem{
-		{act: action{kind: actRunSelected}, full: "▶ run", short: "▶", tip: "run the selected cell · shift+enter / ctrl+r", enabled: true},
-		{act: action{kind: actRunAll}, full: "▶▶ run all", short: "▶▶", tip: "run all cells · A", enabled: true},
-		{act: action{kind: actInterrupt}, full: "■ stop", short: "■", tip: "interrupt execution · ctrl+c", enabled: m.busy()},
-		{act: action{kind: actRestart}, full: "↻ restart", short: "↻", tip: "restart the kernel, clearing all declarations · R", enabled: true},
+		{act: action{kind: actRunSelected}, full: "▶ run", short: "▶", tip: withKey("run the selected cell", m.keys.RunAdvance), enabled: true},
+		{act: action{kind: actRunAll}, full: "▶▶ run all", short: "▶▶", tip: withKey("run all cells", m.keys.RunAll), enabled: true},
+		{act: action{kind: actInterrupt}, full: "■ stop", short: "■", tip: withKey("interrupt execution", m.keys.Interrupt), enabled: m.busy()},
+		{act: action{kind: actRestart}, full: "↻ restart", short: "↻", tip: withKey("restart the kernel, clearing all declarations", m.keys.Restart), enabled: true},
 		{sep: true},
-		{act: action{kind: actAddCode, cell: m.sel + 1}, full: "+ code", short: "+go", tip: "insert a code cell below · b", enabled: true},
+		{act: action{kind: actAddCode, cell: m.sel + 1}, full: "+ code", short: "+go", tip: withKey("insert a code cell below", m.keys.InsertBelow), enabled: true},
 		{act: action{kind: actAddMarkdown, cell: m.sel + 1}, full: "+ markdown", short: "+md", tip: "insert a markdown cell below", enabled: true},
 		{sep: true},
-		{act: action{kind: actSave}, full: "save", short: "save", tip: "save the notebook · ctrl+s", enabled: true},
-		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: "change the color theme · T", enabled: true},
-		{act: action{kind: actHelp}, full: "? help", short: "?", tip: "keyboard shortcuts · ?", enabled: true},
+		{act: action{kind: actSave}, full: "save", short: "save", tip: withKey("save the notebook", m.keys.Save), enabled: true},
+		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: true},
+		{act: action{kind: actHelp}, full: "? help", short: "?", tip: withKey("keyboard shortcuts", m.keys.Help), enabled: true},
 	}
 	build := func(short bool) *lineBuilder {
 		lb := &lineBuilder{}
@@ -220,7 +220,7 @@ func (m *Model) renderFooter() string {
 	t := m.theme
 	pill := t.modeCmd.Render("COMMAND")
 	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
-	tip := "switch to edit mode · enter"
+	tip := withKey("switch to edit mode", m.keys.Edit)
 	if m.inputFocused() {
 		pill = t.modeInsert.Render("INPUT")
 		bindings = m.keys.inputShort(m.in.focus == focusStdin)
@@ -228,7 +228,7 @@ func (m *Model) renderFooter() string {
 	} else if m.mode == modeEdit {
 		pill = t.modeEdit.Render("EDIT")
 		bindings = m.keys.editShort()
-		tip = "switch to command mode · esc"
+		tip = withKey("switch to command mode", m.keys.Escape)
 		if m.vim.enabled {
 			st := t.modeEdit
 			switch m.vim.mode {
@@ -759,9 +759,9 @@ func (m *Model) renderInputLine(i int, c *Cell, width int) (string, []zone) {
 // its tooltip, and the target type's name.
 func (m *Model) convertAction(i int) (action, string, string) {
 	if m.cells[i].kind == notebook.Code {
-		return action{kind: actToMarkdown, cell: i}, "convert to markdown · m", "markdown"
+		return action{kind: actToMarkdown, cell: i}, withKey("convert to markdown", m.keys.ToMarkdown), "markdown"
 	}
-	return action{kind: actToCode, cell: i}, "convert to go code · y", "go"
+	return action{kind: actToCode, cell: i}, withKey("convert to go code", m.keys.ToCode), "go"
 }
 
 // cellActions appends the per-cell action buttons.
@@ -774,14 +774,14 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		tip    string
 		danger bool
 	}
-	run := btn{action{kind: actRunCell, cell: i}, "▶", "run cell · ctrl+enter", false}
+	run := btn{action{kind: actRunCell, cell: i}, "▶", withKey("run cell", m.keys.Run), false}
 	switch {
 	case markdown:
-		run = btn{action{kind: actEditCell, cell: i}, "✎", "edit cell · enter", false}
+		run = btn{action{kind: actEditCell, cell: i}, "✎", withKey("edit cell", m.keys.Edit), false}
 	case c.kind == notebook.Markdown:
-		run.tip = "render markdown · ctrl+enter"
+		run.tip = withKey("render markdown", m.keys.Run)
 	case m.running != nil && m.running.cellID == c.id:
-		run = btn{action{kind: actInterrupt}, "■", "stop execution · ctrl+c", false}
+		run = btn{action{kind: actInterrupt}, "■", withKey("stop execution", m.keys.Interrupt), false}
 	}
 	convAct, convTip, convTo := m.convertAction(i)
 	convIcon := "md"
@@ -791,19 +791,19 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 	btns := []btn{
 		run,
 		{convAct, "⇄" + convIcon, convTip, false},
-		{action{kind: actMoveUp, cell: i}, "↑", "move cell up · K", false},
-		{action{kind: actMoveDown, cell: i}, "↓", "move cell down · J", false},
+		{action{kind: actMoveUp, cell: i}, "↑", withKey("move cell up", m.keys.MoveUp), false},
+		{action{kind: actMoveDown, cell: i}, "↓", withKey("move cell down", m.keys.MoveDown), false},
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
-		{action{kind: actDeleteCell, cell: i}, "✕", "delete cell · dd", true},
+		{action{kind: actDeleteCell, cell: i}, "✕", withKey("delete cell", m.keys.Delete), true},
 	}
 	if c.kind == notebook.Code {
 		btns = append(btns, btn{action{kind: actFormatCell, cell: i}, "fmt", "format Go code · alt+shift+f", false})
 	}
 	switch {
 	case !markdown && m.fixable(c):
-		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", "fix the error with AI (" + m.assistant.Model() + ") · f", false}}, btns...)
+		btns = append([]btn{{action{kind: actFixCell, cell: i}, "✦ fix", withKey("fix the error with AI ("+m.assistant.Model()+")", m.keys.Fix), false}}, btns...)
 	case !markdown && m.editable(c):
-		btns = append([]btn{{action{kind: actAskCell, cell: i}, "✦", "ask AI to change this cell (" + m.assistant.Model() + ") · e", false}}, btns...)
+		btns = append([]btn{{action{kind: actAskCell, cell: i}, "✦", withKey("ask AI to change this cell ("+m.assistant.Model()+")", m.keys.Ask), false}}, btns...)
 	}
 	sep := frame.Render("─")
 	if markdown {
@@ -939,9 +939,18 @@ func (m *Model) renderOverlay() (string, []zone) {
 		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.assistant != nil) {
 			var rows []string
 			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
+			keyWidth := 8
 			for _, b := range sec.keys {
+				if b.Enabled() {
+					keyWidth = max(keyWidth, min(12, ansi.StringWidth(b.Help().Key)))
+				}
+			}
+			for _, b := range sec.keys {
+				if !b.Enabled() {
+					continue
+				}
 				h := b.Help()
-				rows = append(rows, t.helpKey.Width(8).Render(h.Key)+t.helpDesc.Render(h.Desc))
+				rows = append(rows, t.helpKey.Width(keyWidth).Render(ansi.Truncate(h.Key, keyWidth, "…"))+t.helpDesc.Render(ansi.Truncate(h.Desc, 26-keyWidth, "…")))
 			}
 			cols = append(cols, lipgloss.NewStyle().Width(26).Render(strings.Join(rows, "\n")))
 		}
@@ -958,10 +967,11 @@ func (m *Model) renderOverlay() (string, []zone) {
 		tips := t.muted.Render("Top-level func/type/var/const/import declarations persist across cells.\n" +
 			"Other statements run in main(); a trailing expression is displayed.\n" +
 			"Use !cmd for shell commands (e.g. !go get …) and %help for magics.\n" +
-			"Mouse: click to select/edit, drag to select text, right-click for a menu.")
+			"Mouse: click to select/edit, drag to select text, right-click for a menu.\n" +
+			"Keys can be changed in config.json (\"keys\"); see gopyter keys.")
 		content := lipgloss.JoinVertical(lipgloss.Left, title("◆ Keyboard shortcuts"), "", grid, "", tips, "",
 			t.subtle.Render("click or press any key to close"))
-		return box.Render(content), nil
+		return box.MaxWidth(m.width).Render(content), nil
 
 	case overlayQuit:
 		return dialog(colWarning, []string{

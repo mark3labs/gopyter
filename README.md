@@ -321,6 +321,43 @@ cursor, or of the enclosing call when the cursor is among its arguments;
 `shift+enter` and `ctrl+enter` need a terminal with the kitty keyboard protocol
 (kitty, Ghostty, WezTerm, foot…); `ctrl+r` and `ctrl+j` work everywhere.
 
+### Custom keys
+
+The table above lists defaults. Run `gopyter keys` to list all 40 command names,
+current keys, defaults and descriptions (`*` marks configured commands).
+Add a `keys` object to [config.json](#themes):
+
+```json
+{
+  "theme": "nord",
+  "keys": {
+    "run_all": ["A", "ctrl+a"],
+    "quit": [],
+    "move_up": ["alt+k"]
+  }
+}
+```
+
+Each list **replaces** that command's defaults; `[]` or `null` unbinds it.
+Omitted commands keep their defaults. `escape` cannot be left unbound.
+Keys use Bubble Tea names such as `ctrl+s`, `alt+enter`, `shift+up`, `A`, `?`,
+`f1`, `pgdown` and `space`. Modifiers are normalized to ctrl, alt, shift, meta,
+hyper, super order. Use `A`, not `shift+a`; with modifiers use
+`ctrl+shift+a`, not `ctrl+A`. Delete still requires pressing its key twice.
+
+Unknown commands, malformed keys and conflicts produce warnings on stderr and
+in the startup status bar; the rest of the settings still apply. A key cannot
+belong to two commands in the same mode; global bindings conflict with both
+command and edit modes. The overridden command loses the conflicting key; if
+both were overridden, the later command in `gopyter keys` loses it. Command
+and edit bindings do not conflict with each other. Help, hints and tooltips
+reflect the configured keys, and mouse actions work even when unbound.
+
+User bindings take priority over fixed editor keys (for example rebinding
+`undo` to `ctrl+u` replaces kill-to-start); these shadows are not warned about.
+Vim, dialogs, menus, pickers, input lines, widgets and `alt+shift+f` are not
+configurable here. There are no per-notebook or command-line key overrides.
+
 ### Vim bindings
 
 Press `V` in command mode to turn vim keys on or off. The setting is saved
@@ -369,7 +406,7 @@ The choice is saved to `$XDG_CONFIG_HOME/gopyter/config.json` (usually
 macOS):
 
 ```json
-{ "theme": "catppuccin" }
+{ "theme": "catppuccin", "keys": { "run_all": ["ctrl+a"], "quit": [] } }
 ```
 
 ```sh
