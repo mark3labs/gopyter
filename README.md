@@ -296,7 +296,11 @@ mode** (green) edits text. Press `?` for the full list.
 | `enter` on a running cell    | focus its widgets (`tab` next, `ctrl+d` done) |
 | `j` `k` `g` `G`              | move selection                           |
 | `a` / `b`                    | insert cell above / below                |
-| `dd` / `z`                   | delete / undo delete                     |
+| `dd` / `z`                   | delete / undo delete, merge or split     |
+| `alt+↑` / `alt+↓`, `shift+click` | extend cell selection (command mode) |
+| `alt+a`                      | select all cells (command mode)          |
+| `alt+m`                      | merge selection, or merge with next      |
+| `alt+-`                      | split at cursor (edit mode, including vim) |
 | `x` `c` `v`, `K` / `J`       | cut / copy / paste, move cell up / down  |
 | `m` / `y` / `r`             | convert to markdown / code / raw (`ctrl+t` toggles code/markdown while editing) |
 | `I`                          | hide/show code or raw input (outputs stay visible) |
@@ -321,6 +325,19 @@ The sidebar starts hidden. **Contents** lists markdown headings (levels 1–3);
 from the last saving run. `tab` switches panels, arrows move, `enter` jumps to
 the declaring cell, and `esc` returns focus to the notebook. It automatically
 hides in narrow terminals and returns when there is room again.
+
+Run, delete, cut/copy/paste, move, convert and clear-output commands apply to
+every selected cell. Other cell commands use the cursor cell. `esc`, navigation,
+plain click and entering edit mode collapse the range. Paste selects the pasted
+cells. Merge keeps the first cell's type and metadata, comments prose into Go
+and fences Go into markdown; running or queued cells cannot be merged or split.
+Split keeps outputs on the original cell. Cell-level `z` retains the last 100
+delete/merge/split operations, separate from editor undo; undoing a split after
+editing either half reports `can't undo split: cell changed` rather than losing edits.
+
+Some terminals intercept `alt+arrow`; `shift+click` is the selection fallback.
+In macOS Terminal, enable **Use Option as Meta** (otherwise Option word motions
+or `alt+-` typing `–` may be intercepted).
 
 Format a code cell with `alt+shift+f` (in command or edit mode), or the `fmt`
 button at the bottom right of the selected/hovered code cell. Formatting uses
@@ -580,6 +597,9 @@ stay in effect. External edits to cell text can be undone.
 
 The Contents and Variables sidebar is inspired by
 [euporie](https://github.com/joouha/euporie) (behavior, not code).
+
+Multi-cell selection, merge and cursor split follow
+[euporie](https://github.com/joouha/euporie)'s notebook operations.
 
 gopyter owes a lot to [GoNB](https://github.com/janpfeifer/gonb), the Go
 kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):

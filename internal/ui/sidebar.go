@@ -67,6 +67,7 @@ func (m *Model) jumpToCell(i int) {
 		return
 	}
 	m.leaveEdit()
+	m.collapse()
 	m.sel = i
 	m.follow = false
 	if i < len(m.layout) {

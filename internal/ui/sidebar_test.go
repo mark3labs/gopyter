@@ -110,6 +110,26 @@ func TestSidebarContentsAndCurrentSection(t *testing.T) {
 	}
 }
 
+func TestSidebarWithCellSelection(t *testing.T) {
+	m := sidebarModel()
+	m.toggleSidebar()
+	m.renderScreen()
+	m.extendTo(2)
+	m.handleMouseDown(tea.Mouse{X: m.width - 1, Y: m.height - footerHeight - 1, Button: tea.MouseLeft, Mod: tea.ModShift})
+	if m.sel != 2 || m.anchor != 0 || !m.side.focused {
+		t.Fatal("shift-click in sidebar changed the cell range")
+	}
+	m.jumpToCell(3)
+	if m.sel != 3 || m.multiSelected() || m.side.focused {
+		t.Fatal("sidebar jump retained the cell range")
+	}
+	m.extendTo(1)
+	m.enterEdit()
+	if m.anchor != -1 || m.side.focused {
+		t.Fatal("editing did not clear range and sidebar focus")
+	}
+}
+
 func TestSidebarJumpAndPanels(t *testing.T) {
 	m := sidebarModel()
 	m.toggleSidebar()

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"image"
 	"slices"
 	"strings"
@@ -46,6 +47,8 @@ const (
 	actMoveDown
 	actDuplicate
 	actDeleteCell
+	actMergeCells
+	actSplitCell
 	actToMarkdown
 	actToCode
 	actClearOutput
@@ -304,6 +307,14 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	if ms.X < m.bodyWidth() && ms.Y >= headerHeight {
 		m.side.focused = false
 	}
+	// Shift-click extends cells even over their action zones, but leaves
+	// shift-click text selection in the active editor alone.
+	if i := m.cellAtScreen(ms.X, ms.Y); i >= 0 && ms.Mod&tea.ModShift != 0 && (m.mode != modeEdit || i != m.sel) {
+		m.follow = false
+		m.leaveEdit()
+		m.extendTo(i)
+		return nil
+	}
 	if z, ok := m.zoneAt(ms.X, ms.Y); ok {
 		return m.doAction(z.act)
 	}
@@ -326,6 +337,7 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	}
 	m.follow = false
 	m.sel = i
+	m.collapse()
 	c := m.cells[i]
 	l := m.layout[i]
 	r := l.render
@@ -518,8 +530,22 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 	if i < 0 {
 		return nil
 	}
-	m.sel = i
+	if m.mode == modeEdit && i != m.sel {
+		m.leaveEdit()
+	}
+	m.focusCell(i)
 	c := m.cells[i]
+	label := func(verb string) string {
+		lo, hi := m.selRange()
+		if hi > lo {
+			return fmt.Sprintf("%s %d cells", verb, hi-lo+1)
+		}
+		return verb + " cell"
+	}
+	mergeLabel := "Merge with next"
+	if m.multiSelected() {
+		mergeLabel = "Merge cells"
+	}
 	a := func(k actionKind) action { return action{kind: k, cell: i} }
 	var items []menuItem
 
@@ -540,6 +566,7 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		items = append(items,
 			menuItem{label: "Paste", key: "", act: a(actPasteText)},
 			menuItem{label: "Select all", act: a(actSelectAll)},
+			menuItem{label: "Split cell here", key: m.keys.Split.Help().Key, act: a(actSplitCell)},
 			menuItem{sep: true})
 	}
 
@@ -547,7 +574,7 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		if m.running != nil && m.running.cellID == c.id {
 			items = append(items, menuItem{label: "■ Stop", key: m.keys.Interrupt.Help().Key, act: a(actInterrupt)})
 		} else {
-			items = append(items, menuItem{label: "▶ Run cell", key: m.keys.Run.Help().Key, act: a(actRunCell)})
+			items = append(items, menuItem{label: "▶ " + label("Run"), key: m.keys.Run.Help().Key, act: a(actRunCell)})
 		}
 		if m.fixable(c) {
 			items = append(items, menuItem{label: "✦ Fix with AI", key: m.keys.Fix.Help().Key, act: a(actFixCell)})
@@ -556,7 +583,7 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 			items = append(items, menuItem{label: "✦ Ask AI…", key: m.keys.Ask.Help().Key, act: a(actAskCell)})
 		}
 	} else {
-		items = append(items, menuItem{label: "▶ Render", key: m.keys.Run.Help().Key, act: a(actRunCell)})
+		items = append(items, menuItem{label: "▶ " + label("Render"), key: m.keys.Run.Help().Key, act: a(actRunCell)})
 	}
 	if m.mode != modeEdit || i != m.sel {
 		items = append(items, menuItem{label: "✎ Edit", key: m.keys.Edit.Help().Key, act: a(actEditCell)})
@@ -567,15 +594,16 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		menuItem{label: "Insert below", key: m.keys.InsertBelow.Help().Key, act: a(actInsertBelow)},
 		menuItem{label: "Duplicate", act: a(actDuplicate)},
 		menuItem{sep: true},
-		menuItem{label: "Cut cell", key: m.keys.Cut.Help().Key, act: a(actCutCell)},
-		menuItem{label: "Copy cell", key: m.keys.Copy.Help().Key, act: a(actCopyCell)},
+		menuItem{label: label("Cut"), key: m.keys.Cut.Help().Key, act: a(actCutCell)},
+		menuItem{label: label("Copy"), key: m.keys.Copy.Help().Key, act: a(actCopyCell)},
 	)
-	if m.clipboard != nil {
+	if len(m.clipboard) > 0 {
 		items = append(items, menuItem{label: "Paste cell below", key: m.keys.Paste.Help().Key, act: a(actPasteCell)})
 	}
 	items = append(items,
-		menuItem{label: "Move up", key: m.keys.MoveUp.Help().Key, act: a(actMoveUp)},
-		menuItem{label: "Move down", key: m.keys.MoveDown.Help().Key, act: a(actMoveDown)},
+		menuItem{label: mergeLabel, key: m.keys.Merge.Help().Key, act: a(actMergeCells)},
+		menuItem{label: label("Move up"), key: m.keys.MoveUp.Help().Key, act: a(actMoveUp)},
+		menuItem{label: label("Move down"), key: m.keys.MoveDown.Help().Key, act: a(actMoveDown)},
 		menuItem{sep: true})
 	if c.kind == notebook.Code {
 		label := "Hide input"
@@ -590,7 +618,7 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 			}
 			items = append(items, menuItem{label: label, key: m.keys.ScrollRight.Help().Key, act: a(actToggleWrap)})
 		}
-		if len(c.outputs) > 0 {
+		if len(c.outputs) > 0 || m.multiSelected() {
 			items = append(items,
 				menuItem{label: "Copy output", key: m.keys.CopyOutput.Help().Key, act: a(actCopyOutput)},
 				menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
@@ -621,7 +649,7 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		menuItem{label: "Save as…", key: m.keys.SaveAs.Help().Key, act: a(actSaveAs)})
 	items = append(items,
 		menuItem{sep: true},
-		menuItem{label: "Delete cell", key: m.keys.Delete.Help().Key, act: a(actDeleteCell), danger: true})
+		menuItem{label: label("Delete"), key: m.keys.Delete.Help().Key, act: a(actDeleteCell), danger: true})
 
 	m.menu = menuState{items: items, x: x, y: y}
 	m.menu.idx = -1
@@ -645,9 +673,7 @@ func synthKey(s string) tea.KeyPressMsg {
 // commandKey runs a named command against a cell, regardless of its keys.
 // Mouse actions must keep working even when their command is unbound.
 func (m *Model) commandKey(cell int, name string) tea.Cmd {
-	if cell >= 0 && cell < len(m.cells) {
-		m.sel = cell
-	}
+	m.focusCell(cell)
 	m.leaveEdit()
 	m.pendingKey = ""
 	return m.runCommand(name, true)
@@ -715,7 +741,7 @@ func (m *Model) doAction(a action) tea.Cmd {
 
 	case actRunCell:
 		if validCell {
-			m.sel = a.cell
+			m.focusCell(a.cell)
 			return m.runSelected(false, false)
 		}
 	case actEditCell:
@@ -738,16 +764,17 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.commandKey(a.cell, "move_up")
 	case actMoveDown:
 		return m.commandKey(a.cell, "move_down")
-	case actToMarkdown, actToCode, actToRaw:
+	case actToMarkdown:
+		return m.commandKey(a.cell, "to_markdown")
+	case actToCode:
+		return m.commandKey(a.cell, "to_code")
+	case actMergeCells:
+		return m.commandKey(a.cell, "merge")
+	case actSplitCell:
+		return m.splitCell(a.cell)
+	case actToRaw:
 		if validCell {
-			kind := notebook.Markdown
-			if a.kind == actToCode {
-				kind = notebook.Code
-			}
-			if a.kind == actToRaw {
-				kind = notebook.Raw
-			}
-			m.convertCell(a.cell, kind)
+			m.convertCell(a.cell, notebook.Raw)
 		}
 	case actToggleInput:
 		if validCell {
@@ -791,15 +818,12 @@ func (m *Model) doAction(a action) tea.Cmd {
 		if validCell {
 			m.cells = append(m.cells[:a.cell+1], append([]*Cell{m.cells[a.cell].clone()}, m.cells[a.cell+1:]...)...)
 			m.sel = a.cell + 1
+			m.collapse()
 			m.dirty = true
 			m.leaveEdit()
 		}
 	case actDeleteCell:
-		if validCell {
-			m.leaveEdit()
-			m.deleteCell(a.cell)
-			return m.setStatus(statusInfo, "%s", withKey("cell deleted · undo delete", m.keys.Undelete))
-		}
+		return m.commandKey(a.cell, "delete")
 	case actCopyOutput:
 		if validCell {
 			if len(m.cells[a.cell].outputs) == 0 {

@@ -27,6 +27,11 @@ type keyCommand struct {
 }
 
 var keyCommands = []keyCommand{
+	{"extend_up", bindCommand, func(k *keyMap) *key.Binding { return &k.ExtendUp }},
+	{"extend_down", bindCommand, func(k *keyMap) *key.Binding { return &k.ExtendDown }},
+	{"select_all", bindCommand, func(k *keyMap) *key.Binding { return &k.SelectAll }},
+	{"merge", bindCommand, func(k *keyMap) *key.Binding { return &k.Merge }},
+	{"split", bindEdit, func(k *keyMap) *key.Binding { return &k.Split }},
 	{"restart_clear", bindGlobal, func(k *keyMap) *key.Binding { return &k.RestartClear }},
 	{"save_as", bindGlobal, func(k *keyMap) *key.Binding { return &k.SaveAs }},
 	{"to_raw", bindCommand, func(k *keyMap) *key.Binding { return &k.ToRaw }},

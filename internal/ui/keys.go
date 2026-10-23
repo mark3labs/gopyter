@@ -18,35 +18,37 @@ type keyMap struct {
 	Input      key.Binding // focus the running program's input
 
 	// Command mode
-	Up, Down       key.Binding
-	Top, Bottom    key.Binding
-	PageUp         key.Binding
-	PageDown       key.Binding
-	Edit           key.Binding
-	InsertAbove    key.Binding
-	InsertBelow    key.Binding
-	Delete         key.Binding
-	Undelete       key.Binding
-	Cut            key.Binding
-	Copy           key.Binding
-	Paste          key.Binding
-	MoveUp         key.Binding
-	MoveDown       key.Binding
-	ToMarkdown     key.Binding
-	ToCode         key.Binding
-	ToggleOutput   key.Binding
-	ClearOutput    key.Binding
-	ClearAllOutput key.Binding
-	RunAll         key.Binding
-	Restart        key.Binding
-	Help           key.Binding
-	Theme          key.Binding
-	Sidebar        key.Binding
-	ToggleVim      key.Binding
-	Fix            key.Binding
-	Ask            key.Binding
-	AIModel        key.Binding
-	Quit           key.Binding
+	Sidebar                 key.Binding
+	ExtendUp, ExtendDown    key.Binding
+	SelectAll, Merge, Split key.Binding
+	Up, Down                key.Binding
+	Top, Bottom             key.Binding
+	PageUp                  key.Binding
+	PageDown                key.Binding
+	Edit                    key.Binding
+	InsertAbove             key.Binding
+	InsertBelow             key.Binding
+	Delete                  key.Binding
+	Undelete                key.Binding
+	Cut                     key.Binding
+	Copy                    key.Binding
+	Paste                   key.Binding
+	MoveUp                  key.Binding
+	MoveDown                key.Binding
+	ToMarkdown              key.Binding
+	ToCode                  key.Binding
+	ToggleOutput            key.Binding
+	ClearOutput             key.Binding
+	ClearAllOutput          key.Binding
+	RunAll                  key.Binding
+	Restart                 key.Binding
+	Help                    key.Binding
+	Theme                   key.Binding
+	ToggleVim               key.Binding
+	Fix                     key.Binding
+	Ask                     key.Binding
+	AIModel                 key.Binding
+	Quit                    key.Binding
 
 	// Edit mode
 	Escape key.Binding
@@ -76,6 +78,11 @@ func newKeyMap() keyMap {
 		Input:        b([]string{"alt+i"}, "alt+i", "input line"),
 		// Widgets: enter on the running cell focuses them, ⇥ moves.
 
+		ExtendUp:       b([]string{"alt+up"}, "alt+↑/↓", "extend selection"),
+		ExtendDown:     b([]string{"alt+down"}, "alt+↓", "extend selection down"),
+		SelectAll:      b([]string{"alt+a"}, "alt+a", "select all cells"),
+		Merge:          b([]string{"alt+m"}, "alt+m", "merge cells"),
+		Split:          b([]string{"alt+-"}, "alt+-", "split cell (editing)"),
 		Up:             b([]string{"up", "k"}, "↑/k", "up"),
 		Down:           b([]string{"down", "j"}, "↓/j", "down"),
 		Top:            b([]string{"g", "home"}, "g", "first cell"),
@@ -86,7 +93,7 @@ func newKeyMap() keyMap {
 		InsertAbove:    b([]string{"a"}, "a", "insert above"),
 		InsertBelow:    b([]string{"b"}, "b", "insert below"),
 		Delete:         b([]string{"d"}, "dd", "delete"),
-		Undelete:       b([]string{"z", "u"}, "z", "undo delete"),
+		Undelete:       b([]string{"z", "u"}, "z", "undo delete/merge/split"),
 		Cut:            b([]string{"x"}, "x", "cut"),
 		Copy:           b([]string{"c"}, "c", "copy"),
 		Paste:          b([]string{"v", "p"}, "v", "paste below"),
@@ -236,7 +243,7 @@ func (k keyMap) baseHelp() []helpSection {
 			widgets, k.Input, hint("^d", "done (input)"),
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
-		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
+		{"Cells", []key.Binding{k.ExtendUp, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
 		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Sidebar, k.Theme, k.ToggleVim, k.Help, k.Quit}},
 		{"Cell", []key.Binding{k.ToRaw, k.ToggleInput, k.ScrollLeft, k.ScrollRight, k.ExtEdit, k.CopyOutput}},
 		{"Editing", []key.Binding{
