@@ -498,6 +498,56 @@ changes) are redrawn in place. When the output isn't a terminal, they're
 printed once, in their final state, when the cell ends, so logs don't get a
 line per animation frame.
 
+## Serving over SSH
+
+`gopyter serve` runs a separate notebook TUI, temporary kernel workspace and
+completion engine for every SSH session, inspired by
+[euporie-hub](https://github.com/joouha/euporie).
+
+```sh
+gopyter serve ~/notes --authorized-keys ~/.ssh/authorized_keys
+ssh -t -p 2222 localhost analysis.ipynb   # open or create ~/notes/analysis.ipynb
+ssh -t -p 2222 localhost sub/plots.ipynb  # paths are relative to ~/notes
+ssh -t -p 2222 localhost                 # new unnamed notebook
+```
+
+The directory defaults to `.`. A PTY is required (`ssh -t`). Commands must be
+one relative `.ipynb` path; command paths and save-as names cannot escape the
+directory, including through symlinks. Missing notebooks are created on save.
+Disconnecting cancels running cells and AI requests and closes that session's
+completion engine and kernel.
+
+| Flag | Default / purpose |
+|---|---|
+| `--authorized-keys FILE` | **Required** OpenSSH public-key allowlist; unreadable, empty or malformed files prevent startup |
+| `--listen ADDRESS` | `127.0.0.1:2222`; choose a non-loopback address deliberately to expose it to the network |
+| `--host-key FILE` | `gopyter/ssh_host_ed25519` in the user config directory; a missing ed25519 key is generated with mode 0600 |
+| `--theme NAME`, `--light` | saved theme, dark by default; one shared theme for all sessions, with the theme picker disabled |
+| `--vim`, `--no-complete`, `--model` | same per-session defaults as the local TUI; `--no-complete` avoids per-session gopls |
+
+`--workdir` is not supported: each session needs its own workspace. The startup
+log prints the address, authorized_keys path and host key's SHA256 fingerprint.
+**Compare that fingerprint with SSH's first-connect prompt** before accepting
+it (or inspect the public key with `ssh-keygen -lf HOST_KEY.pub`). Password and
+keyboard-interactive authentication are never offered; there is no anonymous
+mode.
+
+**Security:** Everyone whose key is in `--authorized-keys` can run any code as
+the user running `gopyter serve`: use it for yourself or a team that already
+shares that account. This is **not a multi-tenant notebook hub**. Cells and
+shell commands have that user's files, credentials, network and environment,
+including API keys; remote AI uses the server's AI configuration and credentials.
+Path confinement prevents mistakes, **not a sandbox**: a cell can still write
+anywhere that OS user can. Treat giving someone access exactly like giving
+them a shell. Each session also costs a workspace, gopls process (unless
+disabled), and Go builds; session limits are not provided.
+
+Sessions opening the same notebook keep separate in-memory copies and kernels.
+A notice warns when another session already has the file open. Saves use atomic
+replacement, so files are not torn, but **the last save wins**. Clean sessions
+reload within a second; dirty sessions show **Reload / Keep mine**, as described
+in [Editing outside gopyter](#editing-outside-gopyter).
+
 ## Editing outside gopyter
 
 gopyter checks the notebook file once a second. If another program changes it,
@@ -534,6 +584,9 @@ kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):
 gopyter's own parts (the terminal UI, drawing images, HTML and widgets as text,
 the `nb` package, variables kept across cells, completion, AI) are separate
 work. To run Go notebooks in Jupyter itself, use GoNB.
+
+The SSH notebook server model is borrowed from
+[euporie-hub in euporie](https://github.com/joouha/euporie).
 
 ## Development
 

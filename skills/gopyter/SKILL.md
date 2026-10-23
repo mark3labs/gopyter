@@ -33,6 +33,7 @@ go version            # required: cells are built with the Go toolchain on PATH
 | Command | Purpose |
 |---|---|
 | `gopyter [file.ipynb]` | open (or create) a notebook in the TUI |
+| `gopyter serve dir --authorized-keys file` | serve the human TUI over SSH to trusted key holders (arbitrary code as the server user); agents should keep using `gopyter run` |
 | `gopyter run file.ipynb` | run every code cell in order and print the outputs |
 | `gopyter run file.ipynb --save` | also write outputs and execution counts into the file |
 | `gopyter run file.ipynb --fail-fast` | stop at the first failing cell |
