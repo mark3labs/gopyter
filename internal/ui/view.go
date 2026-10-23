@@ -1017,10 +1017,11 @@ func (m *Model) renderOverlay() (string, []zone) {
 		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.assistant != nil) {
 			var rows []string
 			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title))
+			// The +1 keeps a blank between the longest key and its description.
 			keyWidth := 8
 			for _, b := range sec.keys {
 				if b.Enabled() {
-					keyWidth = max(keyWidth, min(12, ansi.StringWidth(b.Help().Key)))
+					keyWidth = max(keyWidth, min(12, ansi.StringWidth(b.Help().Key)+1))
 				}
 			}
 			for _, b := range sec.keys {
@@ -1028,7 +1029,8 @@ func (m *Model) renderOverlay() (string, []zone) {
 					continue
 				}
 				h := b.Help()
-				rows = append(rows, t.helpKey.Width(keyWidth).Render(ansi.Truncate(h.Key, keyWidth, "…"))+t.helpDesc.Render(ansi.Truncate(h.Desc, 26-keyWidth, "…")))
+				// 25, not 26: keep a blank column before the next section.
+				rows = append(rows, t.helpKey.Width(keyWidth).Render(ansi.Truncate(h.Key, keyWidth-1, "…"))+t.helpDesc.Render(ansi.Truncate(h.Desc, 25-keyWidth, "…")))
 			}
 			cols = append(cols, lipgloss.NewStyle().Width(26).Render(strings.Join(rows, "\n")))
 		}

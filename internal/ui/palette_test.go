@@ -214,8 +214,9 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 		}
 		seen[d] = true
 	}
-	// Split needs an active editor cursor, just like the Editing section.
-	excluded := map[string]bool{"split cell (editing)": true, "up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
+	// Split needs an active editor cursor, just like the Editing section;
+	// "extend selection" is the mouse-only ⇧click hint.
+	excluded := map[string]bool{"split cell (editing)": true, "extend selection": true, "up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
 	for _, sec := range m.keys.baseHelp() {
 		if sec.title == "Editing" {
 			continue
@@ -336,7 +337,7 @@ func TestPaletteSelectionCommands(t *testing.T) {
 		}
 		m.runPalette(i)
 	}
-	run("extend selection down")
+	run("extend down")
 	wantRange(t, m, 0, 1)
 	run("merge cells")
 	wantSources(t, m, "a\n\nb", "c")

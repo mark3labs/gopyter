@@ -19,6 +19,41 @@ func outputCellModel() *Model {
 	return m
 }
 
+// TestHelpColumnsKeepGap is a regression test: a description as long as its
+// column ("insert / open line") ran straight into the next column's key.
+func TestHelpColumnsKeepGap(t *testing.T) {
+	m := outputCellModel()
+	m.width, m.height = 110, 40
+	m.vim.enabled = true
+	m.overlay = overlayHelp
+	text, _ := m.renderOverlay()
+	found := 0
+	for line := range strings.SplitSeq(ansi.Strip(text), "\n") {
+		runes := []rune(line)
+		for _, k := range []string{"i a o", "d c y"} {
+			before, _, ok := strings.Cut(line, k)
+			if !ok {
+				continue
+			}
+			found++
+			// Columns are 26 wide; the last one must stay blank.
+			if end := len([]rune(before)) + 25; end < len(runes) && runes[end] != ' ' {
+				t.Errorf("%q runs into the next column: %q", k, line)
+			}
+		}
+	}
+	if found == 0 {
+		t.Fatal("vim help rows not rendered")
+	}
+	// Keys as wide as their column ran into their description too.
+	plain := ansi.Strip(text)
+	for _, want := range []string{"alt+k/F1 ", "alt+⇧+f ", "extend up ", "extend down "} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("help is missing %q", want)
+		}
+	}
+}
+
 func numberedOutput(n int) string {
 	var b strings.Builder
 	for i := range n {

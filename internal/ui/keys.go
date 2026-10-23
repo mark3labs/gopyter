@@ -65,8 +65,8 @@ func newKeyMap() keyMap {
 	return keyMap{
 		ToRaw:        b([]string{"r"}, "r", "to raw"),
 		ToggleInput:  b([]string{"I"}, "I", "hide/show input"),
-		ScrollLeft:   b([]string{"<"}, "<", "scroll output left"),
-		ScrollRight:  b([]string{">"}, ">", "scroll output right"),
+		ScrollLeft:   b([]string{"<"}, "<", "scroll output ←"),
+		ScrollRight:  b([]string{">"}, ">", "scroll output →"),
 		ExtEdit:      b([]string{"E"}, "E", "edit in $EDITOR"),
 		CopyOutput:   b([]string{"C"}, "C", "copy output"),
 		RestartClear: b([]string{"alt+r"}, "alt+r", "restart & clear"),
@@ -79,8 +79,8 @@ func newKeyMap() keyMap {
 		Input:        b([]string{"alt+i"}, "alt+i", "input line"),
 		// Widgets: enter on the running cell focuses them, ⇥ moves.
 
-		ExtendUp:       b([]string{"alt+up"}, "alt+↑/↓", "extend selection"),
-		ExtendDown:     b([]string{"alt+down"}, "alt+↓", "extend selection down"),
+		ExtendUp:       b([]string{"alt+up"}, "alt+↑", "extend up"),
+		ExtendDown:     b([]string{"alt+down"}, "alt+↓", "extend down"),
 		SelectAll:      b([]string{"alt+a"}, "alt+a", "select all cells"),
 		Merge:          b([]string{"alt+m"}, "alt+m", "merge cells"),
 		Split:          b([]string{"alt+-"}, "alt+-", "split cell (editing)"),
@@ -245,12 +245,12 @@ func (k keyMap) baseHelp() []helpSection {
 			widgets, k.Input, hint("^d", "done (input)"),
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
-		{"Cells", []key.Binding{k.ExtendUp, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
+		{"Cells", []key.Binding{k.ExtendUp, k.ExtendDown, hint("⇧click", "extend selection"), k.SelectAll, k.Merge, k.Split, k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
 		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.SaveAs, k.Sidebar, k.Theme, k.ToggleVim, k.Palette, k.Help, k.Quit}},
 		{"Cell", []key.Binding{k.ToRaw, k.ToggleInput, k.ScrollLeft, k.ScrollRight, k.ExtEdit, k.CopyOutput}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
-			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "format Go code")),
+			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+⇧+f", "format Go code")),
 			key.NewBinding(key.WithKeys("shift+left"), key.WithHelp("⇧+move", "select")),
 			key.NewBinding(key.WithKeys("alt+a"), key.WithHelp("alt+a", "select all")),
 			key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("^c", "copy selection")),
