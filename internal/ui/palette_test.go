@@ -143,7 +143,7 @@ func TestPaletteAvailability(t *testing.T) {
 	if paletteFind(m, "paste below") < 0 {
 		t.Fatal("no paste after copy")
 	}
-	m.convertCell(0, false)
+	m.convertCell(0, notebook.Markdown)
 	m.openPalette()
 	if paletteFind(m, "to code") < 0 || paletteFind(m, "to markdown") >= 0 || paletteFind(m, "format Go code") >= 0 {
 		t.Fatal("markdown availability")
@@ -201,7 +201,7 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 	m.commandKey(0, "copy")
 	m.deleteCell(0)
 	m.cur().status = statusFailed
-	m.cur().outputs = []notebook.Output{{Kind: notebook.Error, Text: "boom"}}
+	m.cur().outputs = []notebook.Output{{Kind: notebook.Error, Text: "boom"}, {Kind: notebook.Stdout, Text: "text"}}
 	// Queueing is sufficient to make interrupt available, without executing code.
 	m.queue = []string{m.cur().id}
 	m.running = &runState{cellID: "other"}
@@ -235,7 +235,7 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 			t.Errorf("missing %q", b)
 		}
 	}
-	m.convertCell(0, false)
+	m.convertCell(0, notebook.Markdown)
 	m.openPalette()
 	if paletteFind(m, "to code") < 0 {
 		t.Fatal("missing to code")

@@ -275,6 +275,8 @@ func (m *Model) renderFooter() string {
 		mid = t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
 			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+	} else if d, ok := m.diagAtCursor(); ok {
+		mid = diagIcon(d.Severity) + " " + t.dim.Render(d.Message)
 	} else if m.hoverTip != "" {
 		mid = lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip)
 	} else if m.pendingKey != "" {
@@ -560,7 +562,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 	}
 	r.lines = append(r.lines, bar+blank+boxTop(boxW, border, title, badge))
 
-	ev := c.ed.Render(innerW, editing, m.hl, t)
+	ev := c.ed.Render(innerW, editing, m.hl, t, m.diagMarks(c))
 	r.ev, r.hasEdit = ev, true
 	r.edTop = len(r.lines)
 	if c.kind == notebook.Code && labelW > 0 {
@@ -569,24 +571,40 @@ func (m *Model) renderCell(i, width int) cellRender {
 	}
 	r.edLeft = gutterWidth + 2
 	side := border.Render("│")
-	for j, l := range ev.lines {
-		lbl := blank
-		if j == 0 {
-			lbl = label
+	if c.inputHidden() && !editing && c.kind != notebook.Markdown {
+		r.hasEdit = false
+		act := action{kind: actToggleInput, cell: i}
+		st := t.muted
+		if m.hovered(act) {
+			st = t.linkHover
 		}
-		r.lines = append(r.lines, bar+lbl+side+" "+padRight(l, innerW)+" "+side)
-	}
-	if c.ed.Value() == "" && !editing {
-		// Placeholder hint on empty cells.
-		idx := r.edTop
-		hintText := "Go code… (enter to edit, shift+enter to run)"
-		if m.editable(c) {
-			hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+		show := "click to show"
+		if m.keys.ToggleInput.Enabled() {
+			show = "click or " + m.keys.ToggleInput.Help().Key + " to show"
 		}
-		// Narrow cells cut the hint rather than overflow the box.
-		hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")
-		hint := t.subtle.Italic(true).Render(hintText)
-		r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
+		text := ansi.Truncate(fmt.Sprintf("⋯ %d lines hidden · %s", len(c.ed.lines), show), innerW, "…")
+		r.lines = append(r.lines, bar+label+side+" "+padRight(st.Render(text), innerW)+" "+side)
+		r.zones = append(r.zones, zone{rect: image.Rect(gutterWidth+2, r.edTop, gutterWidth+2+lipgloss.Width(text), r.edTop+1), act: act, tip: withKey("show the cell's code", m.keys.ToggleInput)})
+	} else {
+		for j, l := range ev.lines {
+			lbl := blank
+			if j == 0 {
+				lbl = label
+			}
+			r.lines = append(r.lines, bar+lbl+side+" "+padRight(l, innerW)+" "+side)
+		}
+		if c.ed.Value() == "" && !editing {
+			// Placeholder hint on empty cells.
+			idx := r.edTop
+			hintText := "Go code… (enter to edit, shift+enter to run)"
+			if m.editable(c) {
+				hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+			}
+			// Narrow cells cut the hint rather than overflow the box.
+			hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")
+			hint := t.subtle.Italic(true).Render(hintText)
+			r.lines[idx] = bar + label + side + " " + padRight(ev.lines[0]+hint, innerW) + " " + side
+		}
 	}
 	footer, zones := m.cellFooter(i, boxW, bar, blank, border)
 	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
@@ -680,6 +698,21 @@ func (m *Model) cellOutputs(i, boxW int, bar, blank string) ([]string, []zone) {
 			lbl = padLeft(t.resultLabel.Render(fmt.Sprintf("Out[%d]", c.count)), gutterWidth-2) + " "
 		}
 		lines = append(lines, bar+lbl+"  "+l)
+	}
+	if c.noWrap {
+		lb := &lineBuilder{}
+		lb.add(bar + blank + "  ")
+		lb.button(action{kind: actScrollOutLeft, cell: i}, withKey("scroll left", m.keys.ScrollLeft), t.muted.Render("◂"))
+		if c.textW > boxW-2 {
+			lb.add(fmt.Sprintf(" cols %d–%d of %d ", c.scrollX+1, min(c.scrollX+boxW-2, c.textW), c.textW))
+		} else {
+			lb.add(" ")
+		}
+		lb.button(action{kind: actScrollOutRight, cell: i}, withKey("scroll right", m.keys.ScrollRight), t.muted.Render("▸"))
+		lb.add(" · " + withKey(withKey("scroll", m.keys.ScrollLeft), m.keys.ScrollRight) + " · ")
+		lb.button(action{kind: actToggleWrap, cell: i}, "wrap output", t.muted.Render("wrap"))
+		zones = append(zones, translate(lb.zones, 0, len(lines))...)
+		lines = append(lines, lb.String())
 	}
 	return lines, zones
 }
@@ -835,6 +868,8 @@ func langTitle(kind notebook.CellType) string {
 	return "go"
 }
 
+const noWrapWidth = 1 << 14
+
 // renderOutputs renders the outputs of a cell, also returning the index of
 // the first result line (or -1) and the widgets of HTML outputs, positioned
 // in the lines. live widgets are interactive, focus is focused.
@@ -843,6 +878,20 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 	var out []string
 	var widgets []htmlview.Widget
 	resultAt := -1
+	c.textW = 0
+	textWidth := width
+	if c.noWrap {
+		textWidth = noWrapWidth
+	}
+	appendText := func(lines []string) {
+		for _, l := range lines {
+			c.textW = max(c.textW, lipgloss.Width(l))
+			if c.noWrap {
+				l = ansi.Cut(l, c.scrollX, c.scrollX+width)
+			}
+			out = append(out, l)
+		}
+	}
 	for _, o := range c.outputs {
 		if (o.Kind == notebook.Result || o.Kind == notebook.ImageOut) && resultAt < 0 {
 			resultAt = len(out)
@@ -858,12 +907,12 @@ func (m *Model) renderOutputs(c *Cell, width int, live bool, focus string) ([]st
 			}
 			out = append(out, lines...)
 		case notebook.Stdout:
-			out = append(out, termLines(o.Text, t.stdout, width)...)
+			appendText(termLines(o.Text, t.stdout, textWidth))
 		case notebook.Stderr:
-			out = append(out, termLines(o.Text, t.stderr, width)...)
+			appendText(termLines(o.Text, t.stderr, textWidth))
 		case notebook.Result:
-			for _, l := range wrapLines(normalizeOutput(o.Text), width) {
-				out = append(out, t.result.Render(l))
+			for _, l := range wrapLines(normalizeOutput(o.Text), textWidth) {
+				appendText([]string{t.result.Render(l)})
 			}
 		case notebook.MarkdownOut:
 			out = append(out, m.md.Render(o.Text, width, nil)...)
@@ -938,7 +987,7 @@ func (m *Model) renderOverlay() (string, []zone) {
 		var grid string
 		for _, sec := range m.keys.fullHelp(m.vim.enabled, m.ai != nil, m.assistant != nil) {
 			var rows []string
-			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title), "")
+			rows = append(rows, lipgloss.NewStyle().Foreground(colWarning).Bold(true).Render(sec.title))
 			keyWidth := 8
 			for _, b := range sec.keys {
 				if b.Enabled() {
@@ -956,19 +1005,33 @@ func (m *Model) renderOverlay() (string, []zone) {
 		}
 		// Lay the sections out in as many columns as fit.
 		perRow := clamp((m.width-10)/26, 1, len(cols))
-		var rowsOut []string
-		for i := 0; i < len(cols); i += perRow {
-			if i > 0 {
-				rowsOut = append(rowsOut, "")
+		// Stack sections in the shortest column rather than reserving a full
+		// grid row for short sections (notably AI and cell commands).
+		stacks := make([]string, perRow)
+		for _, col := range cols {
+			idx := 0
+			for j := 1; j < len(stacks); j++ {
+				if lipgloss.Height(stacks[j]) < lipgloss.Height(stacks[idx]) {
+					idx = j
+				}
 			}
-			rowsOut = append(rowsOut, lipgloss.JoinHorizontal(lipgloss.Top, cols[i:min(i+perRow, len(cols))]...))
+			if stacks[idx] == "" {
+				stacks[idx] = col
+			} else {
+				stacks[idx] += "\n" + col
+			}
 		}
-		grid = lipgloss.JoinVertical(lipgloss.Left, rowsOut...)
+		grid = lipgloss.JoinHorizontal(lipgloss.Top, stacks...)
 		tips := t.muted.Render("Top-level func/type/var/const/import declarations persist across cells.\n" +
 			"Other statements run in main(); a trailing expression is displayed.\n" +
 			"Use !cmd for shell commands (e.g. !go get …) and %help for magics.\n" +
 			"Mouse: click to select/edit, drag to select text, right-click for a menu.\n" +
 			"Keys can be changed in config.json (\"keys\"); see gopyter keys.")
+		if m.height <= 40 {
+			content := lipgloss.JoinVertical(lipgloss.Left, title("◆ Keyboard shortcuts"), grid,
+				t.subtle.Render("click or press any key to close"))
+			return box.Padding(0, dlgPadX).MaxWidth(m.width).Render(content), nil
+		}
 		content := lipgloss.JoinVertical(lipgloss.Left, title("◆ Keyboard shortcuts"), "", grid, "", tips, "",
 			t.subtle.Render("click or press any key to close"))
 		return box.MaxWidth(m.width).Render(content), nil
