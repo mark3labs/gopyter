@@ -28,6 +28,9 @@ const (
 	actHelp
 	actTheme
 	actToggleMode
+	actToggleSidebar
+	actSidebarPanel
+	actSidebarItem
 
 	// Per cell (action.cell is the cell index).
 	actRunCell
@@ -182,7 +185,10 @@ func (m *Model) zoneAt(x, y int) (zone, bool) {
 }
 
 // cellAtScreen returns the index of the cell under screen row y, or -1.
-func (m *Model) cellAtScreen(y int) int {
+func (m *Model) cellAtScreen(x, y int) int {
+	if x >= m.bodyWidth() {
+		return -1
+	}
 	if y < headerHeight || y >= m.height-footerHeight {
 		return -1
 	}
@@ -200,7 +206,7 @@ func (m *Model) hoverAt(x, y int) (action, string, int) {
 	z, _ := m.zoneAt(x, y)
 	cell := -1
 	if m.overlay == overlayNone {
-		cell = m.cellAtScreen(y)
+		cell = m.cellAtScreen(x, y)
 	}
 	return z.act, z.tip, cell
 }
@@ -287,18 +293,26 @@ func (m *Model) handleMouseDown(ms tea.Mouse) tea.Cmd {
 	if ms.Button != tea.MouseLeft {
 		return nil
 	}
+	if ms.X < m.bodyWidth() && ms.Y >= headerHeight {
+		m.side.focused = false
+	}
 	if z, ok := m.zoneAt(ms.X, ms.Y); ok {
 		return m.doAction(z.act)
 	}
+	if m.sidebarWidth() > 0 && ms.X >= m.bodyWidth() && ms.Y >= headerHeight && ms.Y < m.height-footerHeight {
+		m.leaveEdit()
+		m.side.focused = true
+		return nil
+	}
 
 	// Scrollbar.
-	if ms.X == m.width-1 && ms.Y >= headerHeight && ms.Y < m.height-footerHeight && m.contentLines > m.viewHeight() {
+	if ms.X == m.bodyWidth()-1 && ms.Y >= headerHeight && ms.Y < m.height-footerHeight && m.contentLines > m.viewHeight() {
 		m.drag = dragState{kind: dragScroll}
 		m.scrollTo(ms.Y)
 		return nil
 	}
 
-	i := m.cellAtScreen(ms.Y)
+	i := m.cellAtScreen(ms.X, ms.Y)
 	if i < 0 {
 		return nil
 	}
@@ -433,6 +447,16 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 		}
 		m.closeCompletion()
 	}
+	if m.sidebarWidth() > 0 && ms.X >= m.bodyWidth() && ms.Y >= headerHeight && ms.Y < m.height-footerHeight {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.side.top -= 3
+		case tea.MouseWheelDown:
+			m.side.top += 3
+		}
+		m.clampSidebar(false)
+		return nil
+	}
 	m.follow = false
 	switch ms.Button {
 	case tea.MouseWheelUp:
@@ -482,7 +506,7 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 // openContextMenu shows a context menu for whatever is under the pointer.
 func (m *Model) openContextMenu(x, y int) tea.Cmd {
 	m.closeCompletion()
-	i := m.cellAtScreen(y)
+	i := m.cellAtScreen(x, y)
 	if i < 0 {
 		return nil
 	}
@@ -603,6 +627,12 @@ func (m *Model) doAction(a action) tea.Cmd {
 	}
 	validCell := a.cell >= 0 && a.cell < len(m.cells)
 	switch a.kind {
+	case actToggleSidebar:
+		return m.toggleSidebar()
+	case actSidebarPanel:
+		m.setSidePanel(sidePanel(a.cell))
+	case actSidebarItem:
+		m.jumpToCell(a.cell)
 	case actRunSelected:
 		return m.runSelected(false, false)
 	case actFocusStdin:

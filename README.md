@@ -298,12 +298,19 @@ mode** (green) edits text. Press `?` for the full list.
 | `alt+shift+f`                | format the selected Go cell with gofmt    |
 | `o` / `O`                    | fold long output / clear output          |
 | `D`                          | clear every cell's output                |
+| `ctrl+b`                     | sidebar: contents and variables (`tab` switches) |
 | `ctrl+s` / `q`               | save / quit                              |
 | `T`                          | pick a color theme                       |
 | `V`                          | turn vim bindings on / off (saved)       |
 | `M`                          | pick the AI model, or turn AI on / off   |
 | `e`                          | ask AI to write or change a cell (when AI is on) |
 | `f`                          | fix a failing cell with AI (when AI is on) |
+
+The sidebar starts hidden. **Contents** lists markdown headings (levels 1–3);
+**Variables** shows persisted declarations with types and one-line value previews
+from the last saving run. `tab` switches panels, arrows move, `enter` jumps to
+the declaring cell, and `esc` returns focus to the notebook. It automatically
+hides in narrow terminals and returns when there is room again.
 
 Format a code cell with `alt+shift+f` (in command or edit mode), or the `fmt`
 button at the bottom right of the selected/hovered code cell. Formatting uses
@@ -348,6 +355,9 @@ visual selection. Since `ctrl+r` is redo in NORMAL mode, run cells from there
 with `shift+enter` or `ctrl+j` (`ctrl+r` still runs from INSERT and command mode).
 
 ## Mouse
+
+Click the sidebar's panel headers to switch panels, or an entry to jump to its
+cell. The wheel over the sidebar scrolls its list independently of the notebook.
 
 Click a cell to edit it, and drag, double-click or triple-click to select text.
 Hover `[n]` and click `[▶]` to run a cell; the buttons on a cell's border run,
@@ -455,6 +465,9 @@ Reloading doesn't reset the kernel, so declarations from cells you already ran
 stay in effect. External edits to cell text can be undone.
 
 ## Acknowledgements
+
+The Contents and Variables sidebar is inspired by
+[euporie](https://github.com/joouha/euporie) (behavior, not code).
 
 gopyter owes a lot to [GoNB](https://github.com/janpfeifer/gonb), the Go
 kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):

@@ -243,4 +243,5 @@ changes, gopyter asks them which version to keep.
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`
 deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`
-picks a theme.
+picks a theme. `ctrl+b` opens a sidebar with a table of contents and the
+kernel's variables (types and values); `tab` switches panels.

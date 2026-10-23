@@ -38,6 +38,7 @@ type keyMap struct {
 	Restart        key.Binding
 	Help           key.Binding
 	Theme          key.Binding
+	Sidebar        key.Binding
 	ToggleVim      key.Binding
 	Fix            key.Binding
 	Ask            key.Binding
@@ -88,6 +89,7 @@ func newKeyMap() keyMap {
 		RunAll:         b([]string{"A"}, "A", "run all"),
 		Restart:        b([]string{"R"}, "R", "restart kernel"),
 		Help:           b([]string{"?"}, "?", "help"),
+		Sidebar:        b([]string{"ctrl+b"}, "^b", "sidebar"),
 		Theme:          b([]string{"T"}, "T", "color theme"),
 		ToggleVim:      b([]string{"V"}, "V", "vim keys on/off"),
 		Fix:            b([]string{"f"}, "f", "AI fix error"),
@@ -123,6 +125,10 @@ func (k keyMap) commandShort(kind notebook.CellType, fixable, editable bool) []k
 
 func (k keyMap) editShort() []key.Binding {
 	return []key.Binding{k.Escape, k.RunAdvance, k.Run, k.RunInsert, k.Undo, k.Save}
+}
+
+func (k keyMap) sidebarShort() []key.Binding {
+	return []key.Binding{hint("↑↓", "move"), hint("↵", "jump"), hint("⇥", "panel"), hint("esc", "notebook"), k.Sidebar}
 }
 
 type helpSection struct {
@@ -201,7 +207,7 @@ func (k keyMap) baseHelp() []helpSection {
 		}},
 		{"Navigation", []key.Binding{k.Up, k.Down, k.Top, k.Bottom, k.PageUp, k.PageDown, k.Edit, k.Escape}},
 		{"Cells", []key.Binding{k.InsertAbove, k.InsertBelow, k.Delete, k.Undelete, k.Cut, k.Copy, k.Paste, k.MoveUp, k.MoveDown}},
-		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.Theme, k.ToggleVim, k.Help, k.Quit}},
+		{"Misc", []key.Binding{k.ToMarkdown, k.ToCode, k.ToggleOutput, k.ClearOutput, k.ClearAllOutput, k.Save, k.Sidebar, k.Theme, k.ToggleVim, k.Help, k.Quit}},
 		{"Editing", []key.Binding{
 			k.Undo, k.Redo,
 			key.NewBinding(key.WithKeys("alt+shift+f"), key.WithHelp("alt+shift+f", "format Go code")),

@@ -79,6 +79,7 @@ type Kernel struct {
 	checkMu sync.Mutex // serializes Check, which reuses one directory
 	ownsDir bool
 	decls   []*Decl
+	peeks   map[string]VarPeek // guarded by mu
 	imports []*Import
 	// resolved is the full import list of the last successful build,
 	// including imports added by goimports (used for completion).
@@ -108,6 +109,9 @@ import (
 	gopyter_os "os"
 	gopyter_filepath "path/filepath"
 	gopyter_reflect "reflect"
+	gopyter_strings "strings"
+	gopyter_sync "sync"
+	gopyter_time "time"
 
 	gopyter_nb "github.com/mark3labs/gopyter/nb"
 )
@@ -222,13 +226,69 @@ func gopyterSaveVar[T any](name, typ string, v T) {
 	}
 }
 
+type gopyterPeek struct {
+	Type string ` + "`json:\"type\"`" + `
+	Value string ` + "`json:\"value\"`" + `
+}
+var gopyterPeekMu gopyter_sync.Mutex
+var gopyterPeeks = map[string]gopyterPeek{}
+
+// Each preview runs independently, so one blocking Stringer cannot hide
+// subsequent variables. The whole batch shares a single time budget.
+func gopyterPeekVars(peeks ...func()) {
+	done := make(chan struct{})
+	var wg gopyter_sync.WaitGroup
+	for _, peek := range peeks { wg.Go(peek) }
+	go func() { defer close(done); wg.Wait() }()
+	select {
+	case <-done:
+	case <-gopyter_time.After(200 * gopyter_time.Millisecond):
+	}
+}
+func gopyterPeekVar(name string, v any) {
+	p := gopyterPeek{Type: gopyter_fmt.Sprintf("%T", v)}
+	gopyterPeekMu.Lock()
+	gopyterPeeks[name] = p
+	gopyterPeekMu.Unlock()
+	p.Value = gopyterPreview(v)
+	gopyterPeekMu.Lock()
+	gopyterPeeks[name] = p
+	gopyterPeekMu.Unlock()
+}
+func gopyterPreview(v any) string {
+	r := gopyter_reflect.ValueOf(v)
+	var s string
+	switch r.Kind() {
+	case gopyter_reflect.Func:
+		return ""
+	case gopyter_reflect.String:
+		s = gopyter_fmt.Sprintf("%q", v)
+	case gopyter_reflect.Slice, gopyter_reflect.Array:
+		if r.Len() > 16 {
+			items := make([]any, 16)
+			for i := range items { items[i] = r.Index(i).Interface() }
+			s = gopyter_fmt.Sprintf("len %d %v …", r.Len(), items)
+		} else { s = gopyter_fmt.Sprintf("%v", v) }
+	case gopyter_reflect.Map:
+		if r.Len() > 16 { s = gopyter_fmt.Sprintf("map len %d", r.Len()) } else { s = gopyter_fmt.Sprintf("%v", v) }
+	default:
+		s = gopyter_fmt.Sprintf("%v", v)
+	}
+	s = gopyter_strings.Join(gopyter_strings.Fields(s), " ")
+	rs := []rune(s)
+	if len(rs) > 120 { s = string(rs[:119]) + "…" }
+	return s
+}
+
 // gopyterVarsDone tells the kernel that the variables were saved.
 func gopyterVarsDone() {
 	dir := gopyter_os.Getenv("GOPYTER_VARS_DIR")
 	if dir == "" {
 		return
 	}
-	b, _ := gopyter_json.Marshal(map[string]any{"errors": gopyterVarErrs})
+	gopyterPeekMu.Lock()
+	b, _ := gopyter_json.Marshal(map[string]any{"errors": gopyterVarErrs, "vars": gopyterPeeks})
+	gopyterPeekMu.Unlock()
 	if err := gopyterWriteFile(gopyter_filepath.Join(dir, "status.json"), b); err != nil {
 		gopyter_fmt.Fprintf(gopyter_os.Stderr, "gopyter: variables not saved: %v\n", err)
 	}
@@ -286,6 +346,7 @@ func (k *Kernel) Reset() error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.decls, k.imports = nil, nil
+	k.peeks = nil
 	return os.RemoveAll(k.VarsDir())
 }
 
@@ -386,6 +447,7 @@ func (k *Kernel) Remove(names ...string) []string {
 				_ = k.removeVarFile(d.Names[0]) // best effort: it only goes stale
 			}
 			for _, n := range d.Names {
+				delete(k.peeks, n)
 				if !strings.Contains(n, "#") {
 					removed = append(removed, n)
 				}
@@ -553,6 +615,13 @@ func (k *Kernel) ExecuteInput(ctx context.Context, cellID, name, src string, in 
 
 	// Compilation succeeded: commit the declarations.
 	k.mu.Lock()
+	for _, d := range prepared.decls {
+		if d.CellID == cellID {
+			for _, n := range d.Names {
+				delete(k.peeks, n)
+			}
+		}
+	}
 	k.decls, k.imports, k.resolved = prepared.decls, prepared.imps, prepared.resolved
 	args := append([]string(nil), k.args...)
 	k.mu.Unlock()
@@ -696,6 +765,7 @@ func (k *Kernel) generate(decls []*Decl, imps []*Import, pc *parsedCell) (string
 	} else {
 		// Deferred so the variables are also saved when the cell panics.
 		body.WriteString("func main() {\ndefer gopyterSaveVars()\n")
+		writePeeks(&body, decls)
 		if pc.parseFlags {
 			body.WriteString("gopyterParseFlags()\n")
 		}
@@ -1084,7 +1154,7 @@ const MagicHelp = "## Cell commands\n\n" +
 	"| `%goflags [flags]` | show or set extra `go build` flags, e.g. `-race` or `-tags=x`; `%goflags \"\"` clears them |\n" +
 	"| `%autoget`, `%noautoget` | fetch missing modules automatically (the default), or not |\n" +
 	"| `%capture [-a] file` | also write this cell's output to a file (`-a` appends) |\n" +
-	"| `%ls` | list persisted declarations |\n" +
+	"| `%ls` | list persisted declarations (see also the sidebar, `ctrl+b`) |\n" +
 	"| `%rm name...` | forget declarations (a type's methods too) or imports |\n" +
 	"| `%cache` | list values stored by `Cache`/`CacheErr` |\n" +
 	"| `%cache clear [key...]` | delete cached values so they are recomputed |\n" +

@@ -24,6 +24,8 @@ type Decl struct {
 	// Var is set for a variable hoisted from a top-level := statement. It
 	// is declared in gopyter_vars.go rather than main.go.
 	Var *VarInfo
+	// Tok identifies var, const, type or func declarations.
+	Tok token.Token
 }
 
 // Import is an import spec that persists across cell executions.
@@ -576,7 +578,7 @@ func (pc *parsedCell) addDecl(cellID, name, src string, c chunk) error {
 			} else if key == "init" {
 				key = fmt.Sprintf("init#%s#%d", cellID, c.start)
 			}
-			pc.decls = append(pc.decls, &Decl{Names: []string{key}, Src: prefixed, Raw: text, CellID: cellID})
+			pc.decls = append(pc.decls, &Decl{Names: []string{key}, Src: prefixed, Raw: text, CellID: cellID, Tok: token.FUNC})
 		case *ast.GenDecl:
 			if d.Tok == token.IMPORT {
 				for _, s := range d.Specs {
@@ -604,7 +606,7 @@ func (pc *parsedCell) addDecl(cellID, name, src string, c chunk) error {
 					}
 				}
 			}
-			pc.decls = append(pc.decls, &Decl{Names: names, Src: prefixed, Raw: text, CellID: cellID})
+			pc.decls = append(pc.decls, &Decl{Names: names, Src: prefixed, Raw: text, CellID: cellID, Tok: d.Tok})
 		}
 	}
 	return nil
