@@ -94,10 +94,15 @@ func rootCmd() *cobra.Command {
 			if !cmd.Flags().Changed("vim") {
 				vim = settings.Vim
 			}
+			_, warnings := ui.KeyCommands(settings.Keys)
+			for _, w := range warnings {
+				cmd.PrintErrf("gopyter: key bindings: %s\n", w)
+			}
 			opts, cleanup, err := sessionOptions(path, workdir, noComplete, vim, aiModel, aiOn)
 			if err != nil {
 				return err
 			}
+			opts.Keys = settings.Keys
 			defer cleanup()
 			opts.Theme, opts.SyntaxTheme, opts.SaveTheme = name, syntax, saveTheme
 			// Probe before the program owns stdin.
@@ -112,7 +117,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
 
-	cmd.AddCommand(runCmd(&workdir), formatCmd(), themesCmd(), modelCmd(), serveCmd(&workdir))
+	cmd.AddCommand(runCmd(&workdir), formatCmd(), themesCmd(), modelCmd(), keysCmd(), serveCmd(&workdir))
 	return cmd
 }
 

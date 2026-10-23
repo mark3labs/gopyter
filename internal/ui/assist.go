@@ -79,11 +79,11 @@ func (t *aiTask) doing() string {
 }
 
 // reviewKey is the key that reopens the task's review.
-func (t *aiTask) reviewKey() string {
+func (t *aiTask) reviewKey(k keyMap) string {
 	if t.isEdit() {
-		return "e"
+		return withKey("review via cell button", k.Ask)
 	}
-	return "f"
+	return withKey("review via cell button", k.Fix)
 }
 
 // askState is the "ask AI" dialog: the cell it edits, and the instruction
@@ -314,7 +314,7 @@ func (m *Model) handleTaskMsg(msg taskMsg) tea.Cmd {
 	}
 	if m.overlay != overlayNone {
 		// Don't pull another dialog or menu out from under the user.
-		return m.setStatus(statusInfo, "%s for %s ready · press %s to review", m.task.noun(), m.task.label, m.task.reviewKey())
+		return m.setStatus(statusInfo, "%s for %s ready · %s", m.task.noun(), m.task.label, m.task.reviewKey(m.keys))
 	}
 	return m.openDialog(overlayReview)
 }
@@ -348,7 +348,7 @@ func (m *Model) applyProposal() tea.Cmd {
 	c.ed.SetValue(p.Source)
 	c.ed.breakUndo()
 	m.dirty, m.follow = true, true
-	return m.setStatus(statusSuccess, "%s applied to %s · shift+enter to run it, ctrl+z while editing to undo", noun, name)
+	return m.setStatus(statusSuccess, "%s applied to %s · %s; %s", noun, name, withKey("run", m.keys.RunAdvance), withKey("undo while editing", m.keys.Undo))
 }
 
 // discardProposal closes the review, dropping the outcome.

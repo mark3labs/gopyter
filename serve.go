@@ -49,6 +49,10 @@ func serveCmd(workdir *string) *cobra.Command {
 				hostKey = filepath.Join(filepath.Dir(p), "ssh_host_ed25519")
 			}
 			settings := loadSettings(cmd)
+			_, warnings := ui.KeyCommands(settings.Keys)
+			for _, w := range warnings {
+				cmd.PrintErrf("gopyter: key bindings: %s\n", w)
+			}
 			name, err := resolveTheme(cmd, theme, settings)
 			if err != nil {
 				return err
@@ -82,6 +86,7 @@ func serveCmd(workdir *string) *cobra.Command {
 						sessions.Done()
 						return opts, cleanup, err
 					}
+					opts.Keys = settings.Keys
 					opts.Theme, opts.LightBackground = name, light
 					opts.Kernel.RunDir = root
 					if path != "" {
