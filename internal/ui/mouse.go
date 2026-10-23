@@ -77,6 +77,7 @@ const (
 	actCompletionItem // action.cell is the completion item index
 	actThemeItem      // action.cell is the theme picker entry index
 	actModelItem      // action.cell is the model picker row index
+	actPaletteItem    // action.cell is the command palette row index
 )
 
 type action struct {
@@ -235,6 +236,9 @@ func (m *Model) handleMouseMotion(ms tea.Mouse) tea.Cmd {
 	}
 	if m.overlay == overlayModel && m.hover.kind == actModelItem {
 		m.picker.idx = m.hover.cell
+	}
+	if m.overlay == overlayPalette && m.hover.kind == actPaletteItem {
+		m.palette.idx = m.hover.cell
 	}
 	if m.comp.open && m.hover.kind == actCompletionItem {
 		m.comp.idx = m.hover.cell
@@ -398,6 +402,15 @@ func (m *Model) handleWheel(ms tea.Mouse) tea.Cmd {
 		}
 		return nil
 	}
+	if m.overlay == overlayPalette {
+		switch ms.Button {
+		case tea.MouseWheelUp:
+			m.movePalette(-1)
+		case tea.MouseWheelDown:
+			m.movePalette(1)
+		}
+		return nil
+	}
 	if m.overlay == overlayModel {
 		switch ms.Button {
 		case tea.MouseWheelUp:
@@ -458,6 +471,10 @@ func (m *Model) overlayClick(ms tea.Mouse) tea.Cmd {
 	case overlayTheme:
 		if !inside {
 			return m.cancelTheme()
+		}
+	case overlayPalette:
+		if !inside {
+			m.closePalette()
 		}
 	case overlayModel:
 		if !inside {
@@ -633,6 +650,8 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.openThemePicker()
 	case actThemeItem:
 		return m.confirmTheme(a.cell)
+	case actPaletteItem:
+		return m.runPalette(a.cell)
 	case actModelItem:
 		return m.choosePicker(a.cell)
 	case actToggleMode:

@@ -62,6 +62,7 @@ var keyCommands = []keyCommand{
 	{"fix", bindCommand, func(k *keyMap) *key.Binding { return &k.Fix }},
 	{"ask", bindCommand, func(k *keyMap) *key.Binding { return &k.Ask }},
 	{"ai_model", bindCommand, func(k *keyMap) *key.Binding { return &k.AIModel }},
+	{"palette", bindCommand, func(k *keyMap) *key.Binding { return &k.Palette }},
 	{"quit", bindCommand, func(k *keyMap) *key.Binding { return &k.Quit }},
 	{"escape", bindEdit, func(k *keyMap) *key.Binding { return &k.Escape }},
 	{"undo", bindEdit, func(k *keyMap) *key.Binding { return &k.Undo }},

@@ -1015,6 +1015,8 @@ func (m *Model) renderOverlay() (string, []zone) {
 
 	case overlayModel:
 		return m.renderModelPicker()
+	case overlayPalette:
+		return m.renderPalette()
 	}
 	return "", nil
 }

@@ -247,4 +247,5 @@ check `gopyter keys` for their current bindings before giving key instructions.
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`
 deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`
-picks a theme.
+picks a theme. In command mode, `ctrl+p` or `:` opens a searchable list of
+every available command; `enter` runs the selection and `esc` closes it.
