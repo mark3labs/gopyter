@@ -26,7 +26,7 @@ gopyter --version || curl -fsSL https://raw.githubusercontent.com/mark3labs/gopy
 go version            # required: cells are built with the Go toolchain on PATH
 ```
 
-`gopls` is optional. It's only used for completion in the TUI.
+`gopls` is optional. It's only used for completion, symbol info and live diagnostics in the TUI.
 
 ## Commands
 

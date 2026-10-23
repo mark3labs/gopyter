@@ -3,11 +3,13 @@ package ui
 import (
 	"go/scanner"
 	"go/token"
+	"image/color"
 	"strings"
 	"unicode"
 
 	"charm.land/lipgloss/v2"
 	"github.com/alecthomas/chroma/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -821,8 +823,14 @@ type editorView struct {
 	gutterW int
 }
 
+// Mark underlines runes [Start, End) of a row in Color.
+type Mark struct {
+	Row, Start, End int
+	Color           color.Color
+}
+
 // Render renders the editor at the given width.
-func (e *Editor) Render(width int, focused bool, hl *highlighter, t theme) editorView {
+func (e *Editor) Render(width int, focused bool, hl *highlighter, t theme, marks []Mark) editorView {
 	if e.tokVersion != e.version {
 		e.tokens = tokenize(e.lang, e.lines)
 		e.tokVersion = e.version
@@ -850,13 +858,35 @@ func (e *Editor) Render(width int, focused bool, hl *highlighter, t theme) edito
 		var seg strings.Builder
 		var segTok chroma.TokenType = -1
 		segSel := false
+		segMark := -1
+		markAt := func(col int) int {
+			for i, mk := range marks {
+				if mk.Row == row && col >= mk.Start && col < max(mk.End, mk.Start+1) {
+					return i
+				}
+			}
+			return -1
+		}
 		flush := func() {
 			if seg.Len() > 0 {
 				st := hl.styleFor(segTok)
 				if segSel {
 					st = st.Background(colSelection)
 				}
-				b.WriteString(st.Render(seg.String()))
+				if segMark >= 0 {
+					st = st.UnderlineStyle(lipgloss.UnderlineCurly).UnderlineColor(marks[segMark].Color)
+				}
+				if segMark >= 0 && strings.TrimSpace(seg.String()) == "" {
+					// Lip Gloss renders whitespace with a single underline even
+					// when UnderlineCurly is selected. Preserve curly marks here.
+					ws := ansi.Style{}.UnderlineStyle(ansi.UnderlineCurly).UnderlineColor(marks[segMark].Color)
+					if segSel {
+						ws = ws.BackgroundColor(colSelection)
+					}
+					b.WriteString(ws.Styled(seg.String()))
+				} else {
+					b.WriteString(st.Render(seg.String()))
+				}
 				seg.Reset()
 			}
 		}
@@ -889,9 +919,10 @@ func (e *Editor) Render(width int, focused bool, hl *highlighter, t theme) edito
 				tok = toks[i]
 			}
 			sel := hasSel && e.inSelection(selA, selB, row, i)
-			if tok != segTok || sel != segSel {
+			mk := markAt(i)
+			if tok != segTok || sel != segSel || mk != segMark {
 				flush()
-				segTok, segSel = tok, sel
+				segTok, segSel, segMark = tok, sel, mk
 			}
 			if r == '\t' {
 				seg.WriteString(strings.Repeat(" ", w))
@@ -901,8 +932,23 @@ func (e *Editor) Render(width int, focused bool, hl *highlighter, t theme) edito
 			x += w
 			vx += w
 		}
+		// A zero-width problem at EOL still needs a visible underline.
+		if mk := markAt(len(l)); mk >= 0 {
+			if vx >= textW {
+				emit(first)
+				first = false
+				vx = 0
+				startCol = len(l)
+			}
+			flush()
+			st := ansi.Style{}.UnderlineStyle(ansi.UnderlineCurly).UnderlineColor(marks[mk].Color)
+			if hasSel && row >= selA.Row && row < selB.Row {
+				st = st.BackgroundColor(colSelection)
+			}
+			b.WriteString(st.Styled(" "))
+		}
 		// Show a selected newline as a highlighted cell at the end of the line.
-		if hasSel && row >= selA.Row && row < selB.Row && vx < textW {
+		if hasSel && row >= selA.Row && row < selB.Row && vx < textW && markAt(len(l)) < 0 {
 			flush()
 			b.WriteString(lipgloss.NewStyle().Background(colSelection).Render(" "))
 		}

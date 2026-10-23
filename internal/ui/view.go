@@ -275,6 +275,8 @@ func (m *Model) renderFooter() string {
 		mid = t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
 			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+	} else if d, ok := m.diagAtCursor(); ok {
+		mid = diagIcon(d.Severity) + " " + t.dim.Render(d.Message)
 	} else if m.hoverTip != "" {
 		mid = lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip)
 	} else if m.pendingKey != "" {
@@ -560,7 +562,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 	}
 	r.lines = append(r.lines, bar+blank+boxTop(boxW, border, title, badge))
 
-	ev := c.ed.Render(innerW, editing, m.hl, t)
+	ev := c.ed.Render(innerW, editing, m.hl, t, m.diagMarks(c))
 	r.ev, r.hasEdit = ev, true
 	r.edTop = len(r.lines)
 	if c.kind == notebook.Code && labelW > 0 {

@@ -118,6 +118,7 @@ type Model struct {
 
 	completer   Completer
 	comp        completionState
+	diag        diagState
 	info        infoState
 	ai          *AIConfig // nil: no AI support at all
 	aiModel     string    // selected model, kept while AI is off
@@ -288,6 +289,11 @@ func (m *Model) setStatus(kind statusKind, format string, args ...any) tea.Cmd {
 func (m *Model) busy() bool { return m.running != nil || len(m.queue) > 0 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	mm, cmd := m.update(msg)
+	return mm, tea.Batch(cmd, m.diagnoseIfChanged())
+}
+
+func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -307,6 +313,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
+
+	case diagTickMsg:
+		if msg.seq == m.diag.seq {
+			return m, m.requestDiagnostics()
+		}
+		return m, nil
+	case diagResultMsg:
+		m.handleDiagResult(msg)
+		return m, nil
 
 	case completionTickMsg:
 		if msg.seq != m.comp.seq {
@@ -693,6 +708,8 @@ func (m *Model) moveCursor(motion string, crossCells bool) {
 
 // leaveEdit switches to command mode.
 func (m *Model) leaveEdit() {
+	m.clearDiagnostics()
+	m.diag.cellID = ""
 	m.closeCompletion()
 	m.closeInfo()
 	if m.mode == modeEdit {
@@ -951,6 +968,9 @@ func (m *Model) startNext() tea.Cmd {
 		_, c := m.cellByID(id)
 		if c == nil || c.kind != notebook.Code {
 			continue
+		}
+		if c.id == m.diag.cellID {
+			m.clearDiagnostics()
 		}
 		m.counter++
 		m.runSeq++
