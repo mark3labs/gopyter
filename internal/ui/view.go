@@ -178,7 +178,7 @@ func (m *Model) renderToolbar() string {
 		{sep: true},
 		{act: action{kind: actSave}, full: "save", short: "save", tip: withKey("save the notebook", m.keys.Save), enabled: true},
 		{act: action{kind: actToggleSidebar}, full: "☰ sidebar", short: "☰", tip: withKey("contents and variables", m.keys.Sidebar), enabled: true},
-		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: true},
+		{act: action{kind: actTheme}, full: "◐ theme", short: "◐", tip: withKey("change the color theme", m.keys.Theme), enabled: !m.themes.fixed},
 		{act: action{kind: actHelp}, full: "? help", short: "?", tip: withKey("keyboard shortcuts", m.keys.Help), enabled: true},
 	}
 	build := func(short bool) *lineBuilder {

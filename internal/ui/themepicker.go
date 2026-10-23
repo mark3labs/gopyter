@@ -11,6 +11,7 @@ import (
 
 // themeState holds the active theme and the theme picker.
 type themeState struct {
+	fixed  bool               // shared palette is read-only while serving
 	name   string             // active (possibly previewed) theme
 	dark   bool               // use the dark variants
 	syntax string             // chroma style overriding the theme's, if set
@@ -30,7 +31,9 @@ func (m *Model) applyTheme(name string) {
 		return
 	}
 	p := def.palette(m.themes.dark)
-	setPalette(p)
+	if !m.themes.fixed {
+		setPalette(p)
+	}
 	m.themes.name = name
 	m.theme = newTheme()
 
@@ -85,6 +88,9 @@ func (m *Model) applyTheme(name string) {
 
 // openThemePicker shows the theme picker with the active theme selected.
 func (m *Model) openThemePicker() tea.Cmd {
+	if m.themes.fixed {
+		return m.setStatus(statusInfo, "the theme is set by gopyter serve (--theme, --light)")
+	}
 	m.closeCompletion()
 	ts := &m.themes
 	ts.names = ThemeNames()
