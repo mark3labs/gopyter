@@ -46,6 +46,10 @@ type response struct {
 // to send back (nil means JSON null).
 type Handler func(method string, params json.RawMessage) any
 
+// NotifyHandler receives server notifications on the read goroutine. It must
+// not block, since responses to calls wait behind it.
+type NotifyHandler func(method string, params json.RawMessage)
+
 // Client is a connection to a language server subprocess.
 type Client struct {
 	cmd     *exec.Cmd
@@ -55,12 +59,13 @@ type Client struct {
 	pmu     sync.Mutex
 	pending map[int64]chan response
 	handler Handler
+	notify  NotifyHandler
 	done    chan struct{}
 	closed  atomic.Bool
 }
 
 // Start launches a language server and begins reading its messages.
-func Start(cmd *exec.Cmd, handler Handler) (*Client, error) {
+func Start(cmd *exec.Cmd, handler Handler, notify NotifyHandler) (*Client, error) {
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -73,7 +78,7 @@ func Start(cmd *exec.Cmd, handler Handler) (*Client, error) {
 		return nil, err
 	}
 	c := &Client{
-		cmd: cmd, w: stdin, handler: handler,
+		cmd: cmd, w: stdin, handler: handler, notify: notify,
 		pending: map[int64]chan response{},
 		done:    make(chan struct{}),
 	}
@@ -110,7 +115,9 @@ func (c *Client) readLoop(r *bufio.Reader) {
 			}
 			_ = c.send(message{ID: msg.ID, Result: mustJSON(result)})
 		case msg.Method != "":
-			// Notification (logs, diagnostics, progress): ignored.
+			if c.notify != nil {
+				c.notify(msg.Method, msg.Params)
+			}
 		case msg.ID != nil:
 			id, err := strconv.ParseInt(strings.Trim(string(*msg.ID), `"`), 10, 64)
 			if err != nil {

@@ -231,12 +231,14 @@ func (m *Model) saveAsConfirm() tea.Cmd {
 		}
 		p = resolved
 	}
+	oldPath := m.path
 	m.path = p
 	m.overlay = overlayNone
 	m.input.Blur()
 	if err := m.save(); err != nil {
 		m.quitAfter = false
-		// Watch the new path from its current state, not the old file's.
+		m.path = oldPath
+		// Invalidate outstanding polls and resume watching the original file.
 		m.snapshotDisk()
 		return m.setStatus(statusError, "save failed: %v", err)
 	}

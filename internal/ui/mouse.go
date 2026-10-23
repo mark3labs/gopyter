@@ -24,6 +24,8 @@ const (
 	actInterrupt
 	actRestart
 	actClearAllOutput
+	actRestartClear
+	actSaveAs
 	actSave
 	actHelp
 	actTheme
@@ -49,6 +51,12 @@ const (
 	actClearOutput
 	actToggleOutput
 	actCopyOutput
+	actToRaw
+	actToggleInput
+	actScrollOutLeft
+	actScrollOutRight
+	actToggleWrap
+	actExtEdit
 	actFixCell     // ask the AI to fix the cell's error
 	actFocusStdin  // type input for the running program
 	actInputDone   // end the running program's input
@@ -570,18 +578,47 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 		menuItem{label: "Move down", key: m.keys.MoveDown.Help().Key, act: a(actMoveDown)},
 		menuItem{sep: true})
 	if c.kind == notebook.Code {
-		items = append(items, menuItem{label: "Convert to markdown", key: m.keys.ToMarkdown.Help().Key, act: a(actToMarkdown)})
+		label := "Hide input"
+		if c.inputHidden() {
+			label = "Show input"
+		}
+		items = append(items, menuItem{label: label, key: m.keys.ToggleInput.Help().Key, act: a(actToggleInput)})
+		if c.hasTextOutput() {
+			label := "Don't wrap output"
+			if c.noWrap {
+				label = "Wrap output"
+			}
+			items = append(items, menuItem{label: label, key: m.keys.ScrollRight.Help().Key, act: a(actToggleWrap)})
+		}
 		if len(c.outputs) > 0 {
 			items = append(items,
-				menuItem{label: "Copy output", act: a(actCopyOutput)},
+				menuItem{label: "Copy output", key: m.keys.CopyOutput.Help().Key, act: a(actCopyOutput)},
 				menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
 		}
-	} else {
+	}
+	if c.kind != notebook.Code {
 		items = append(items, menuItem{label: "Convert to code", key: m.keys.ToCode.Help().Key, act: a(actToCode)})
 	}
+	if c.kind != notebook.Markdown {
+		items = append(items, menuItem{label: "Convert to markdown", key: m.keys.ToMarkdown.Help().Key, act: a(actToMarkdown)})
+	}
+	if c.kind != notebook.Raw {
+		items = append(items, menuItem{label: "Convert to raw", key: m.keys.ToRaw.Help().Key, act: a(actToRaw)})
+	}
+	if c.kind == notebook.Raw {
+		label := "Hide input"
+		if c.inputHidden() {
+			label = "Show input"
+		}
+		items = append(items, menuItem{label: label, key: m.keys.ToggleInput.Help().Key, act: a(actToggleInput)})
+	}
+	items = append(items, menuItem{label: "Edit in $EDITOR", key: m.keys.ExtEdit.Help().Key, act: a(actExtEdit)})
 	if m.hasOutputs() {
 		items = append(items, menuItem{label: "Clear all outputs", key: m.keys.ClearAllOutput.Help().Key, act: a(actClearAllOutput)})
 	}
+	items = append(items,
+		menuItem{label: "Restart & clear outputs", key: m.keys.RestartClear.Help().Key, act: a(actRestartClear)},
+		menuItem{label: "Save as…", key: m.keys.SaveAs.Help().Key, act: a(actSaveAs)})
 	items = append(items,
 		menuItem{sep: true},
 		menuItem{label: "Delete cell", key: m.keys.Delete.Help().Key, act: a(actDeleteCell), danger: true})
@@ -655,6 +692,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.restart()
 	case actClearAllOutput:
 		return m.clearAllOutputs()
+	case actRestartClear:
+		return m.restartAndClear()
+	case actSaveAs:
+		return m.openSaveAs()
 	case actSave:
 		return m.saveCmd()
 	case actHelp:
@@ -697,9 +738,36 @@ func (m *Model) doAction(a action) tea.Cmd {
 		return m.commandKey(a.cell, "move_up")
 	case actMoveDown:
 		return m.commandKey(a.cell, "move_down")
-	case actToMarkdown, actToCode:
+	case actToMarkdown, actToCode, actToRaw:
 		if validCell {
-			m.convertCell(a.cell, a.kind == actToCode)
+			kind := notebook.Markdown
+			if a.kind == actToCode {
+				kind = notebook.Code
+			}
+			if a.kind == actToRaw {
+				kind = notebook.Raw
+			}
+			m.convertCell(a.cell, kind)
+		}
+	case actToggleInput:
+		if validCell {
+			c := m.cells[a.cell]
+			if c.kind == notebook.Markdown {
+				return m.setStatus(statusInfo, "markdown cells have no input to hide")
+			}
+			c.setInputHidden(!c.inputHidden())
+			m.dirty = true
+			if c.inputHidden() {
+				m.leaveEdit()
+			}
+		}
+	case actScrollOutLeft, actScrollOutRight, actToggleWrap:
+		if validCell {
+			return m.scrollOutput(a.cell, a.kind)
+		}
+	case actExtEdit:
+		if validCell {
+			return m.startExternalEdit(a.cell)
 		}
 	case actClearOutput:
 		return m.commandKey(a.cell, "clear_output")
@@ -734,6 +802,9 @@ func (m *Model) doAction(a action) tea.Cmd {
 		}
 	case actCopyOutput:
 		if validCell {
+			if len(m.cells[a.cell].outputs) == 0 {
+				return m.setStatus(statusInfo, "no output to copy")
+			}
 			text := plainOutput(m.cells[a.cell])
 			m.textClip = text
 			return tea.Batch(tea.SetClipboard(text), m.setStatus(statusSuccess, "output copied to clipboard"))
