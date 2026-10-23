@@ -41,6 +41,15 @@ func Path() (string, error) {
 	return filepath.Join(dir, "gopyter", "config.json"), nil
 }
 
+// HistoryPath returns the console history location next to config.json.
+func HistoryPath() (string, error) {
+	p, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "console_history"), nil
+}
+
 // Load reads the settings from the default location. A missing file yields
 // zero settings and no error.
 func Load() (Settings, error) {

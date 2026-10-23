@@ -18,8 +18,8 @@ import (
 // printed when the cell ends, in their final state, instead of every
 // frame of an animation.
 type blocks struct {
-	w   io.Writer
-	tty bool
+	w      io.Writer
+	redraw bool
 
 	lastKey   string // the block printed last, if nothing followed it
 	lastLines int
@@ -28,8 +28,8 @@ type blocks struct {
 	pending map[string]string
 }
 
-func newBlocks(w io.Writer, tty bool) *blocks {
-	return &blocks{w: w, tty: tty, pending: map[string]string{}}
+func newBlocks(w io.Writer, redraw bool) *blocks {
+	return &blocks{w: w, redraw: redraw, pending: map[string]string{}}
 }
 
 // outputKey identifies output i of outs across updates.
@@ -44,14 +44,14 @@ func outputKey(outs []notebook.Output, i int) string {
 // false for changes made by DOM operations.
 func (b *blocks) show(key, text string, updatable, event bool) {
 	switch {
-	case b.tty && key == b.lastKey:
+	case b.redraw && key == b.lastKey:
 		if b.lastLines > 0 {
 			// Raw: lipgloss would strip it when the terminal was only
 			// detected through the environment (e.g. CLICOLOR_FORCE).
 			_, _ = fmt.Fprintf(b.w, "\x1b[%dA\r\x1b[J", b.lastLines) // output is best-effort
 		}
 		b.print(key, text)
-	case !event, !b.tty && updatable:
+	case !event, !b.redraw && updatable:
 		if _, ok := b.pending[key]; !ok {
 			b.order = append(b.order, key)
 		}
@@ -85,16 +85,16 @@ func (b *blocks) finish() {
 }
 
 // renderOutput draws a rich output.
-func renderOutput(o notebook.Output, tty bool) string {
+func renderOutput(o notebook.Output, opts Options) string {
 	switch o.Kind {
 	case notebook.Result:
 		return paint(resultStyle, "=> "+o.Text)
 	case notebook.MarkdownOut:
-		return renderMarkdown(o.Text)
+		return renderMarkdown(o.Text, opts.Width)
 	case notebook.ImageOut:
-		return renderImage(o.Text, tty)
+		return renderImage(o.Text, opts.Images, opts.Width)
 	case notebook.HTMLOut:
-		return renderHTML(o.Text, tty)
+		return renderHTML(o.Text, opts.Images, opts.Width)
 	}
 	return o.Text
 }

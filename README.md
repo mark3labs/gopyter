@@ -15,6 +15,7 @@ so GoNB notebooks run in gopyter too. See [Acknowledgements](#acknowledgements).
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter, and GoNB notebooks (cell commands, `gonbui`, widgets) run in gopyter
 - **Themes.** gopyter's own Go-blue look plus the themes of [kit](https://github.com/mark3labs/kit) (catppuccin, dracula, tokyonight, gruvbox, nord…), with light and dark variants
+- **Inline Go console.** `gopyter console` runs a REPL on the notebook kernel, with history, completion and scrollback you can copy
 - **Headless runs** for scripts and CI: `gopyter run notes.ipynb --save`
 - **Live reload.** Edits made to the notebook file by other programs show up automatically
 - **Optional AI.** Off until you pick a model; then `e` asks it to write or change a cell as you describe, and `f` to fix a failing one. Every proposal is checked to compile, and you see the diff before anything changes
@@ -444,6 +445,50 @@ changes) are redrawn in place. When the output isn't a terminal, they're
 printed once, in their final state, when the cell ends, so logs don't get a
 line per animation frame.
 
+## Console
+
+```sh
+gopyter console                      # interactive Go, on one notebook kernel
+gopyter console --save session.ipynb # save every executed input and its outputs on exit
+gopyter console < snippet.go          # line mode for scripts and agents
+```
+
+Declarations and `:=` values persist just as in notebooks; a trailing expression
+prints `=> value`. Magics and `!shell` lines work too. Finished inputs are
+syntax-highlighted in normal terminal scrollback (no alternate screen or mouse
+capture); the live editor is plain text. Outputs use the headless runner's
+rendering, without success timing lines. Widgets are inactive; use the notebook
+UI to interact with them.
+
+- `enter` runs complete input, or adds a newline with the current indentation.
+  Open brackets, raw strings, block comments, trailing operators and continued
+  `!` commands wait for more input. End a `%%` cell magic with a blank line.
+- `alt+enter` always adds a newline; `ctrl+r` / `ctrl+j` force execution even
+  when input is incomplete, so the compiler can report errors.
+- `up` on the first line / `down` on the last line browse history, restoring
+  your draft after the newest entry. History is stored as JSON lines in
+  `console_history` beside [config.json](#themes), with permissions 0600,
+  capped at 1000 inputs and without consecutive duplicates. Inputs can contain
+  secrets: avoid typing them into history, or remove the history file afterwards.
+- `tab` completes a word (gopls, or the basic fallback), lists alternatives and
+  cycles through them; in leading whitespace it indents. `--no-complete`
+  disables completion.
+- While running, `stdin>` sends a line to the program on `enter`; `ctrl+d`
+  closes its input. The unfinished output line stays visible above it.
+- `ctrl+c` interrupts execution, or clears idle input (on empty input it shows
+  an exit hint). `ctrl+d` exits on empty idle input, otherwise deletes the next
+  character. `ctrl+l` clears the screen.
+
+`%save file.ipynb` saves the inputs executed so far, with execution counts and
+outputs; `%save -f file.ipynb` permits overwriting. The save command itself is
+not recorded. `--save FILE` saves on exit, overwriting the destination. Open the
+result with `gopyter file.ipynb` or Jupyter with GoNB.
+
+When stdin is not a terminal, complete inputs are grouped by the same rules
+and run without a TUI. Programs receive no stdin (it belongs to the script),
+and any failed input makes the command exit non-zero. `--workdir` selects a
+persistent kernel workspace as with the notebook commands.
+
 ## Editing outside gopyter
 
 gopyter checks the notebook file once a second. If another program changes it,
@@ -477,6 +522,10 @@ kernel for Jupyter by [Jan Pfeifer](https://github.com/janpfeifer):
 gopyter's own parts (the terminal UI, drawing images, HTML and widgets as text,
 the `nb` package, variables kept across cells, completion, AI) are separate
 work. To run Go notebooks in Jupyter itself, use GoNB.
+
+The inline console's scrollback-first interaction and conversion to a notebook
+follow [euporie's console](https://github.com/joouha/euporie); its execution
+model remains the same GoNB-inspired kernel used by notebooks.
 
 ## Development
 

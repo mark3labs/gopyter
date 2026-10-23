@@ -57,12 +57,12 @@ var md = markdown.New(markdown.Colors{
 	Subtle: lipgloss.Color(palette.Dark.Subtle), CodeBg: lipgloss.Color(palette.Dark.Faint),
 }, styles.Get(palette.Dark.Syntax))
 
-func renderMarkdown(s string) string {
-	return strings.Join(md.Render(s, 100, nil), "\n")
+func renderMarkdown(s string, width int) string {
+	return strings.Join(md.Render(s, width, nil), "\n")
 }
 
 // renderImage draws a base64 image, or describes it when draw is false.
-func renderImage(b64 string, draw bool) string {
+func renderImage(b64 string, draw bool, width int) string {
 	img, err := termimg.Decode(b64)
 	if err != nil {
 		return errStyle.Render("can't show image: " + err.Error())
@@ -70,7 +70,7 @@ func renderImage(b64 string, draw bool) string {
 	if !draw {
 		return resultStyle.Render("=> " + termimg.Placeholder(img))
 	}
-	return strings.Join(termimg.Render(img, 100, 40), "\n")
+	return strings.Join(termimg.Render(img, width, 40), "\n")
 }
 
 // htmlStyles draw HTML outputs; widgets are drawn inactive.
@@ -86,8 +86,8 @@ var htmlStyles = htmlview.Styles{
 	Accent:      labelStyle,
 }
 
-func renderHTML(s string, tty bool) string {
-	lines, _ := htmlview.Render(s, htmlview.Options{Width: 100, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty})
+func renderHTML(s string, tty bool, width int) string {
+	lines, _ := htmlview.Render(s, htmlview.Options{Width: width, Styles: htmlStyles, MaxImageLines: 40, NoImages: !tty})
 	return strings.Join(lines, "\n")
 }
 
@@ -142,8 +142,6 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			continue
 		}
 		count++
-		c.ExecutionCount = count
-		c.Outputs = nil
 		name := fmt.Sprintf("In[%d]", count)
 
 		writeln(w, labelStyle.Render(name))
@@ -151,67 +149,10 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 			writeln(w, codeStyle.Render("  │ "+l))
 		}
 
-		appendOut := func(kind notebook.OutputKind, text, id string) int {
-			var i int
-			c.Outputs, i = notebook.AddOutput(c.Outputs, kind, text, id)
-			return i
-		}
-		// Program output that styles itself (escape codes) is passed
-		// through: write adapts its colors to w.
-		bl := newBlocks(w, tty)
-		rawOut := false
-		stream := func(st lipgloss.Style, text string) {
-			bl.other()
-			rawOut = rawOut || strings.Contains(text, "\x1b")
-			if rawOut {
-				write(w, text)
-			} else {
-				write(w, paint(st, text))
-			}
-		}
-		ev := newEvents()
 		start := time.Now()
-		err := k.ExecuteInput(ctx, c.ID, name, c.Source, kernel.Input{Stdin: stdin, Events: ev.reader()}, func(e kernel.Event) {
-			if e.Kind == kernel.Op {
-				r := ev.session.Apply(c.Outputs, e.Text)
-				if r.Changed {
-					for i := range r.Outputs {
-						if r.Outputs[i].Text != c.Outputs[i].Text {
-							bl.show(outputKey(r.Outputs, i), renderOutput(r.Outputs[i], tty), r.Outputs[i].ID != "", false)
-						}
-					}
-					c.Outputs = r.Outputs
-				}
-				ev.reply(r.Reply)
-				return
-			}
-			kind, ok := e.Kind.OutputKind()
-			if !ok {
-				return
-			}
-			i := appendOut(kind, e.Text, e.ID)
-			switch e.Kind {
-			case kernel.Stdout:
-				stream(outStyle, e.Text)
-			case kernel.Stderr:
-				stream(stderrStyle, e.Text)
-			case kernel.Result, kernel.Markdown, kernel.Image, kernel.HTML:
-				bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], tty), e.ID != "", true)
-			case kernel.Error:
-				bl.other()
-				writeln(w, paint(errStyle, e.Text))
-			case kernel.Info:
-				bl.other()
-				writeln(w, codeStyle.Render("› "+e.Text))
-			}
-		})
-		ev.close()
-		bl.finish()
+		err := RunCell(ctx, k, c, count, w, stdin, Options{Images: tty, Redraw: tty})
 		if err != nil {
 			failed++
-			if !errors.Is(err, kernel.ErrCompile) {
-				appendOut(notebook.Error, err.Error(), "")
-			}
 			writeln(w, errStyle.Render("✗ "+err.Error()))
 			if failFast || errors.Is(err, kernel.ErrInterrupted) {
 				return failed
@@ -222,4 +163,81 @@ func Run(ctx context.Context, k *kernel.Kernel, nb *notebook.Notebook, w io.Writ
 		writeln(w)
 	}
 	return failed
+}
+
+// Options control output rendering independently of in-place updates.
+type Options struct {
+	Images bool // draw images rather than placeholders
+	Redraw bool // redraw the last updated output in place
+	Width  int  // rendering width; zero defaults to 100
+}
+
+// RunCell executes one input, replacing its outputs and execution count.
+// It prints outputs but neither source nor a success/error status line.
+// Widgets are done at once; stdin may be nil for no input.
+func RunCell(ctx context.Context, k *kernel.Kernel, c *notebook.Cell, count int, w io.Writer, stdin io.Reader, opts Options) error {
+	if opts.Width <= 0 {
+		opts.Width = 100
+	}
+	c.ExecutionCount, c.Outputs = count, nil
+	name := fmt.Sprintf("In[%d]", count)
+	appendOut := func(kind notebook.OutputKind, text, id string) int {
+		var i int
+		c.Outputs, i = notebook.AddOutput(c.Outputs, kind, text, id)
+		return i
+	}
+	// Program output that styles itself (escape codes) is passed
+	// through: write adapts its colors to w.
+	bl := newBlocks(w, opts.Redraw)
+	rawOut := false
+	stream := func(st lipgloss.Style, text string) {
+		bl.other()
+		rawOut = rawOut || strings.Contains(text, "\x1b")
+		if rawOut {
+			write(w, text)
+		} else {
+			write(w, paint(st, text))
+		}
+	}
+	ev := newEvents()
+	err := k.ExecuteInput(ctx, c.ID, name, c.Source, kernel.Input{Stdin: stdin, Events: ev.reader()}, func(e kernel.Event) {
+		if e.Kind == kernel.Op {
+			r := ev.session.Apply(c.Outputs, e.Text)
+			if r.Changed {
+				for i := range r.Outputs {
+					if r.Outputs[i].Text != c.Outputs[i].Text {
+						bl.show(outputKey(r.Outputs, i), renderOutput(r.Outputs[i], opts), r.Outputs[i].ID != "", false)
+					}
+				}
+				c.Outputs = r.Outputs
+			}
+			ev.reply(r.Reply)
+			return
+		}
+		kind, ok := e.Kind.OutputKind()
+		if !ok {
+			return
+		}
+		i := appendOut(kind, e.Text, e.ID)
+		switch e.Kind {
+		case kernel.Stdout:
+			stream(outStyle, e.Text)
+		case kernel.Stderr:
+			stream(stderrStyle, e.Text)
+		case kernel.Result, kernel.Markdown, kernel.Image, kernel.HTML:
+			bl.show(outputKey(c.Outputs, i), renderOutput(c.Outputs[i], opts), e.ID != "", true)
+		case kernel.Error:
+			bl.other()
+			writeln(w, paint(errStyle, e.Text))
+		case kernel.Info:
+			bl.other()
+			writeln(w, codeStyle.Render("› "+e.Text))
+		}
+	})
+	ev.close()
+	bl.finish()
+	if err != nil && !errors.Is(err, kernel.ErrCompile) {
+		appendOut(notebook.Error, err.Error(), "")
+	}
+	return err
 }

@@ -130,3 +130,18 @@ func TestUpdateAIModel(t *testing.T) {
 		t.Fatalf("got %s", data)
 	}
 }
+
+func TestHistoryPath(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	p, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := HistoryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h != filepath.Join(filepath.Dir(p), "console_history") {
+		t.Fatal(h)
+	}
+}
