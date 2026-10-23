@@ -243,6 +243,10 @@ check `gopyter keys` for their current bindings before giving key instructions.
 
 `enter`/`esc` switch between edit and command mode. `ctrl+r` (or
 `shift+enter`) runs the cell and moves to the next one; `A` runs all cells.
+`r` converts to raw (never run), `I` hides/shows code or raw input, `E` edits
+in `$VISUAL`/`$EDITOR`, `C` copies output, `<`/`>` scroll wide text output,
+`alt+r` restarts and clears idle outputs, and `alt+s` opens save-as (the last
+two work in both modes).
 `a`/`b` insert a cell above/below, `m`/`y` convert to markdown/code, `dd`
 deletes, `O`/`D` clear the selected cell's output / every output, `ctrl+s`
 saves, `q` quits, and `?` lists every key. `V` toggles vim bindings and `T`

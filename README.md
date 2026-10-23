@@ -294,7 +294,13 @@ mode** (green) edits text. Press `?` for the full list.
 | `a` / `b`                    | insert cell above / below                |
 | `dd` / `z`                   | delete / undo delete                     |
 | `x` `c` `v`, `K` / `J`       | cut / copy / paste, move cell up / down  |
-| `m` / `y` (`ctrl+t` editing) | convert to markdown / code               |
+| `m` / `y` / `r`             | convert to markdown / code / raw (`ctrl+t` toggles code/markdown while editing) |
+| `I`                          | hide/show code or raw input (outputs stay visible) |
+| `<` / `>`                    | scroll text output left/right; first `>` stops wrapping, `<` at column zero restores it |
+| `E`                          | edit the selected cell in `$VISUAL` / `$EDITOR` (fallback: `vi`) |
+| `C`                          | copy the cell's output to the clipboard |
+| `alt+r`                      | restart kernel and clear idle cells' outputs (both modes) |
+| `alt+s`                      | save as a new path (both modes) |
 | `alt+shift+f`                | format the selected Go cell with gofmt    |
 | `o` / `O`                    | fold long output / clear output          |
 | `D`                          | clear every cell's output                |
@@ -384,9 +390,19 @@ Yanks also go to the system clipboard, and a mouse selection turns into a
 visual selection. Since `ctrl+r` is redo in NORMAL mode, run cells from there
 with `shift+enter` or `ctrl+j` (`ctrl+r` still runs from INSERT and command mode).
 
+Raw cells are plain text and never run. Hiding input is saved as Jupyter's
+`metadata.jupyter.source_hidden`; entering edit mode shows it again. Duplicated
+cells start with visible input. Sideways scrolling affects stdout, stderr and
+text results only, and is not saved. Programs that wrap their own terminal
+output keep doing so. Restart-and-clear interrupts a running cell, but leaves
+its output until it finishes, just like clearing outputs with `D`. Save-as
+moves file watching to the new path, but does not move the kernel's run directory.
+
 ## Mouse
 
 Click a cell to edit it, and drag, double-click or triple-click to select text.
+Click a hidden-input placeholder to show the source. Under unwrapped text output,
+click `◂` / `▸` to scroll or **wrap** to restore wrapping.
 Hover `[n]` and click `[▶]` to run a cell; the buttons on a cell's border run,
 convert, move, duplicate or delete it. Right-click opens a context menu, and the
 toolbar under the title covers running, adding cells, saving, themes and help. Hovering
@@ -482,6 +498,11 @@ printed once, in their final state, when the cell ends, so logs don't get a
 line per animation frame.
 
 ## Editing outside gopyter
+
+Press `E` in command mode to edit a cell in `$VISUAL`, then `$EDITOR`, falling
+back to `vi`. Space-separated arguments such as `code --wait` are supported.
+Saving and quitting applies the source as one undo step without running it.
+Jupyter's `source_hidden` metadata is kept when saving and reloading notebooks.
 
 gopyter checks the notebook file once a second. If another program changes it,
 for example an editor or `gopyter run --save`, gopyter reloads it and keeps

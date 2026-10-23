@@ -27,6 +27,14 @@ type keyCommand struct {
 }
 
 var keyCommands = []keyCommand{
+	{"restart_clear", bindGlobal, func(k *keyMap) *key.Binding { return &k.RestartClear }},
+	{"save_as", bindGlobal, func(k *keyMap) *key.Binding { return &k.SaveAs }},
+	{"to_raw", bindCommand, func(k *keyMap) *key.Binding { return &k.ToRaw }},
+	{"toggle_input", bindCommand, func(k *keyMap) *key.Binding { return &k.ToggleInput }},
+	{"scroll_output_left", bindCommand, func(k *keyMap) *key.Binding { return &k.ScrollLeft }},
+	{"scroll_output_right", bindCommand, func(k *keyMap) *key.Binding { return &k.ScrollRight }},
+	{"external_edit", bindCommand, func(k *keyMap) *key.Binding { return &k.ExtEdit }},
+	{"copy_output", bindCommand, func(k *keyMap) *key.Binding { return &k.CopyOutput }},
 	{"run_advance", bindGlobal, func(k *keyMap) *key.Binding { return &k.RunAdvance }},
 	{"run", bindGlobal, func(k *keyMap) *key.Binding { return &k.Run }},
 	{"run_insert", bindGlobal, func(k *keyMap) *key.Binding { return &k.RunInsert }},
