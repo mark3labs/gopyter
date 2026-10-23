@@ -57,7 +57,7 @@ func TestEditorBasics(t *testing.T) {
 func TestEditorRenderWrapAndClick(t *testing.T) {
 	e := NewEditor("go", "abcdefghij\nx")
 	e.SetCursor(0, 9)
-	v := e.Render(3+6, true, newHighlighter("dracula"), newTheme())
+	v := e.Render(3+6, true, newHighlighter("dracula"), newTheme(), nil)
 	// gutter is 3 wide (1 digit + 2), text width 6 → first line wraps.
 	if len(v.lines) != 3 {
 		t.Fatalf("expected 3 visual lines, got %d", len(v.lines))

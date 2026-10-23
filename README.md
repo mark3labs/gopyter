@@ -11,6 +11,7 @@ so GoNB notebooks run in gopyter too. See [Acknowledgements](#acknowledgements).
 
 - **Real Go, cell by cell.** Declarations persist across cells, the last expression is displayed, and compile errors point at cell lines
 - **IDE-style completion** from [gopls](https://go.dev/gopls), aware of everything earlier cells declared
+- **Live diagnostics.** With gopls, errors and warnings are underlined as you type; the message under the cursor appears in the footer
 - **Symbol info.** `alt+k` (or `K` in vim) shows the signature and docs of the function, type or variable under the cursor
 - **Keyboard and mouse.** Jupyter's modal keys, plus clickable toolbar, cell actions, context menus and text selection
 - **Standard `.ipynb` files** with a [GoNB](https://github.com/janpfeifer/gonb) kernelspec, so notebooks also open in Jupyter, and GoNB notebooks (cell commands, `gonbui`, widgets) run in gopyter
@@ -45,7 +46,7 @@ it. Intel Macs are served by the two commands above, since nixpkgs no longer
 supports them.
 
 **Requirements:** the [Go toolchain](https://go.dev/dl/) on your `PATH`, since
-cells are compiled with it. For completion and symbol info, install
+cells are compiled with it. For completion, symbol info and live diagnostics, install
 `go install golang.org/x/tools/gopls@latest` (without it, gopyter falls back to
 basic completion). The Go toolchain is *not* part of the Nix closure: cells are
 compiled with whatever `go` is on your `PATH`, so install Go from Nix too if the
@@ -133,6 +134,9 @@ They run headless too: `gopyter run examples/images.ipynb`.
 
   `CacheErr` does not store failed results. `%cache clear resp` forces a recompute.
 - Imports are added automatically, and third-party modules are fetched on first use.
+  Until a cell importing a third-party module has been built, live diagnostics
+  may report missing imports or undefined package names. Diagnostics also omit
+  parse errors located in generated wrapper code (such as an unclosed block at EOF).
 
 ## Rich output
 

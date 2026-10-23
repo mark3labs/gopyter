@@ -88,6 +88,11 @@ type Engine struct {
 	// requests send concurrently, so gopls sees increasing versions.
 	syncMu sync.Mutex
 
+	diagMu      sync.Mutex // notifications must never wait for RPCs under mu
+	publication diagnosticPublication
+	diagChanged chan struct{}
+	mirrors     map[int]mirror // guarded by mu
+
 	stdOnce sync.Once
 	std     map[string]string // unambiguous package name -> import path
 }
@@ -164,6 +169,7 @@ func (e *Engine) start() error {
 	if err != nil {
 		return err
 	}
+	e.file, e.uri = file, fileURI(file) // immutable before the notification goroutine starts
 	cmd := exec.Command(path, "serve")
 	cmd.Dir = e.k.Dir
 	cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod")
@@ -178,7 +184,7 @@ func (e *Engine) start() error {
 			return out
 		}
 		return nil
-	})
+	}, e.notifyDiagnostics)
 	if err != nil {
 		return err
 	}
@@ -194,6 +200,7 @@ func (e *Engine) start() error {
 		"capabilities": map[string]any{
 			"workspace": map[string]any{"configuration": true, "workspaceFolders": true},
 			"textDocument": map[string]any{
+				"publishDiagnostics": map[string]any{"versionSupport": true},
 				"completion": map[string]any{
 					"completionItem": map[string]any{
 						"snippetSupport":      false,
@@ -219,7 +226,7 @@ func (e *Engine) start() error {
 		return fmt.Errorf("starting gopls: %w", err)
 	}
 	e.mu.Lock()
-	e.client, e.file, e.uri = client, file, fileURI(file)
+	e.client = client
 	e.mu.Unlock()
 	return nil
 }
@@ -309,7 +316,7 @@ func (e *Engine) Hover(ctx context.Context, req Request) (string, error) {
 	default:
 	}
 
-	src, err := e.sync(client, req)
+	src, _, err := e.sync(client, req)
 	if err != nil {
 		return "", err
 	}
@@ -432,7 +439,7 @@ type lspItem struct {
 
 // sync mirrors the cell into the gopls workspace file, returning the
 // generated source with the cursor position mapped into it.
-func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource, error) {
+func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource, int, error) {
 	std := e.stdPackages()
 	src := e.k.CompletionSource(req.CellID, req.Src, req.Row, req.Col, func(name string) (string, bool) {
 		p, ok := std[name]
@@ -444,6 +451,11 @@ func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource,
 	e.mu.Lock()
 	e.version++
 	version := e.version
+	if e.mirrors == nil {
+		e.mirrors = make(map[int]mirror)
+	}
+	e.mirrors[version] = mirror{cellID: req.CellID, src: req.Src, cs: src}
+	delete(e.mirrors, version-16)
 	opened := e.opened
 	e.opened = true
 	// Dependencies change when cells `go get` new modules.
@@ -472,11 +484,11 @@ func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource,
 			"contentChanges": []any{map[string]string{"text": src.Content}},
 		})
 	}
-	return src, err
+	return src, version, err
 }
 
 func (e *Engine) gopls(ctx context.Context, client *lsp.Client, req Request) (Result, error) {
-	src, err := e.sync(client, req)
+	src, _, err := e.sync(client, req)
 	if err != nil {
 		return Result{}, err
 	}
