@@ -452,7 +452,7 @@ func TestEditNotOffered(t *testing.T) {
 	}
 
 	m = newFixModel(t, &fakeAssistant{})
-	m.convertCell(0, false)
+	m.convertCell(0, notebook.Markdown)
 	m.sel = 0
 	m.handleKey(keyE)
 	if m.overlay != overlayNone || !strings.Contains(m.status, "code cells") {
