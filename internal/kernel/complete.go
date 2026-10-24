@@ -144,7 +144,10 @@ func (k *Kernel) CompletionSource(cellID, src string, row, col int, resolve func
 		}
 	}
 	for _, imp := range k.resolved {
-		if !seenPath[imp.Path] && imp.Name != "_" {
+		// gopyter_nb is the build's import for compatAliases, which the
+		// mirror has in gopyter_compat.go. Copied, it'd be unused and
+		// hide the cell's own nb import.
+		if !seenPath[imp.Path] && imp.Name != "_" && !strings.HasPrefix(imp.Name, "gopyter_") {
 			seenPath[imp.Path] = true
 			prevImports = append(prevImports, imp)
 		}

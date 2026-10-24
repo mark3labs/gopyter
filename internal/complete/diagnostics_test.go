@@ -141,4 +141,10 @@ func TestGoplsDiagnostics(t *testing.T) {
 			t.Error(r.ds[0])
 		}
 	}
+	// Regression test: analyzer warnings were never shown, and after a run
+	// nb was reported undefined.
+	ds, err = e.Diagnose(ctx, Request{CellID: "a", Src: "nb.Display(1)\nfmt.Printf(\"%d\\n\", \"s\")"})
+	if err != nil || len(ds) != 1 || ds[0].Severity != SeverityWarning || ds[0].Source != "printf" || ds[0].Row != 1 {
+		t.Fatalf("printf: %+v %v", ds, err)
+	}
 }

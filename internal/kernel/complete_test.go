@@ -35,3 +35,17 @@ func TestCompletionSourceSegments(t *testing.T) {
 		t.Fatal(simple.Content)
 	}
 }
+
+// TestCompletionSourceNBAfterRun is a regression test: after a build, the
+// resolved gopyter_nb alias import hid the cell's nb import, so gopls
+// reported "undefined: nb".
+func TestCompletionSourceNBAfterRun(t *testing.T) {
+	k := newTestKernel(t)
+	if _, err := run(t, k, "1", "x := 1\nfmt.Println(x)"); err != nil {
+		t.Fatal(err)
+	}
+	cs := k.CompletionSource("2", "nb.Display(1)", 0, 0, func(string) (string, bool) { return "", false })
+	if !strings.Contains(cs.Content, "\t \""+NBPath+"\"") || strings.Contains(cs.Content, "gopyter_nb") {
+		t.Fatalf("mirror imports:\n%s", cs.Content)
+	}
+}

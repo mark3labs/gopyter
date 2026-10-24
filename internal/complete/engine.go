@@ -143,6 +143,11 @@ var goplsSettings = map[string]any{
 	"completionBudget":        "200ms",
 	// pkg.go.dev links are noise in a terminal popup.
 	"linksInHover": false,
+	// With a delay, gopls publishes type errors first and analyzer
+	// warnings (printf...) later at the same version; Diagnose returns
+	// the first publication, so the warnings would never show. A cell is
+	// one small package, so the full pass is cheap.
+	"diagnosticsDelay": "0s",
 }
 
 // New creates an engine and starts gopls in the background.
