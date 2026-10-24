@@ -52,11 +52,13 @@ func (s *outSync) marker(n uint64) {
 	}
 }
 
-// beforeMessage waits until stdout reached marker n (or ended).
+// beforeMessage waits until stdout reached marker n (or ended). n is 0
+// when the program couldn't write the marker because its stdout is gone:
+// what it wrote before is still in the pipe, so wait for the end.
 func (s *outSync) beforeMessage(n uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for s.stdout < n && !s.stdoutDone {
+	for (n == 0 || s.stdout < n) && !s.stdoutDone {
 		s.cond.Wait()
 	}
 }

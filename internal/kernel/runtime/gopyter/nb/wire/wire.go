@@ -46,7 +46,8 @@ const (
 )
 
 // send writes one message, as "<seq>\t<json>\n". seq is 0 when no marker
-// could be written, so the kernel doesn't wait for one.
+// could be written (stdout is closed), so the kernel emits the message
+// after the rest of stdout.
 func send(v any) bool {
 	if !connected {
 		return false

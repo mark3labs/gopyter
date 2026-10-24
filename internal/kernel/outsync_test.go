@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 // chunkReader returns s in reads of at most n bytes.
@@ -93,5 +94,28 @@ func TestOutputOrderWithoutStdout(t *testing.T) {
 	out, err := run(t, k, "1", "fmt.Println(\"a\")\nos.Stdout.Close()\nnb.Display(1)\nnb.Display(2)")
 	if err != nil || out != "a\n=> 1\n=> 2\n" {
 		t.Fatalf("%q %v", out, err)
+	}
+}
+
+// TestUnmarkedMessageWaitsForStdout is a regression test: a message sent
+// after the program closed its stdout (seq 0) didn't wait, so it could be
+// emitted before output still in the pipe (flaky on macOS).
+func TestUnmarkedMessageWaitsForStdout(t *testing.T) {
+	s := newOutSync()
+	emitted := make(chan struct{})
+	go func() {
+		s.beforeMessage(0)
+		close(emitted)
+	}()
+	select {
+	case <-emitted:
+		t.Fatal("emitted before stdout ended")
+	case <-time.After(50 * time.Millisecond):
+	}
+	s.closeStdout()
+	select {
+	case <-emitted:
+	case <-time.After(time.Second):
+		t.Fatal("still waiting after stdout ended")
 	}
 }

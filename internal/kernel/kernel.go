@@ -982,7 +982,7 @@ func (k *Kernel) run(ctx context.Context, bin string, args []string, in Input, e
 		for sc.Scan() {
 			// "<seq>\t<json>": see outsync.go.
 			seqText, msg, _ := bytes.Cut(sc.Bytes(), []byte{'\t'})
-			seq, _ := strconv.ParseUint(string(seqText), 10, 64) // 0: nothing to wait for
+			seq, _ := strconv.ParseUint(string(seqText), 10, 64) // 0: after all of stdout
 			osync.beforeMessage(seq)
 			emitMessage(msg, emit)
 			osync.afterMessage(seq)
