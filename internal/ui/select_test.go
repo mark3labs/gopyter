@@ -383,3 +383,58 @@ func TestRenderRangeSelected(t *testing.T) {
 		t.Fatal("range footer missing")
 	}
 }
+
+// TestToRawRange is a regression test: r converted only the cursor cell.
+func TestToRawRange(t *testing.T) {
+	m := selectionModel("a", "b", "c")
+	alt(m, 'a')
+	m.handleKey(synthKey("r"))
+	for i, c := range m.cells {
+		if c.kind != notebook.Raw {
+			t.Fatalf("cell %d is %v", i, c.kind)
+		}
+	}
+}
+
+// TestUndoMergeAfterChange is a regression test: undoing a merge threw
+// away edits made to the merged cell since.
+func TestUndoMergeAfterChange(t *testing.T) {
+	m := selectionModel("a", "b")
+	alt(m, 'm')
+	m.cells[0].ed.InsertText("x")
+	m.handleKey(synthKey("z"))
+	if len(m.cells) != 1 || !strings.Contains(m.cells[0].ed.Value(), "x") || m.status != "can't undo merge: cell changed" {
+		t.Fatalf("undo dropped edits: %q (%s)", m.cells[0].ed.Value(), m.status)
+	}
+	if len(m.undo) != 1 {
+		t.Fatal("refused undo must stay available")
+	}
+}
+
+// TestCutPasteKeepsMetadata is a regression test: clone dropped metadata,
+// so a cut hidden cell came back visible and lost its tags.
+func TestCutPasteKeepsMetadata(t *testing.T) {
+	m := selectionModel("a", "b")
+	m.cells[0].metadata = map[string]any{"tags": []any{"keep"}}
+	m.cells[0].setInputHidden(true)
+	m.handleKey(synthKey("x"))
+	m.handleKey(synthKey("v"))
+	c := m.cells[1]
+	if c.ed.Value() != "a" || !c.inputHidden() || c.metadata["tags"] == nil {
+		t.Fatalf("pasted %q metadata %v", c.ed.Value(), c.metadata)
+	}
+	// Copies are independent: showing one leaves the clipboard hidden.
+	c.setInputHidden(false)
+	if !m.clipboard[0].inputHidden() {
+		t.Fatal("paste shares metadata with the clipboard")
+	}
+	m.doAction(action{kind: actDuplicate, cell: 0})
+	if m.cells[1].inputHidden() || m.cells[1].metadata["tags"] != nil {
+		t.Fatalf("duplicate: %v", m.cells[1].metadata)
+	}
+	m.cells[0].setInputHidden(true)
+	m.doAction(action{kind: actDuplicate, cell: 0})
+	if !m.cells[0].inputHidden() || m.cells[1].inputHidden() {
+		t.Fatal("duplicates start with visible input, leaving the original")
+	}
+}

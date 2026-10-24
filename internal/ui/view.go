@@ -603,7 +603,11 @@ func (m *Model) renderCell(i, width int) cellRender {
 		if m.keys.ToggleInput.Enabled() {
 			show = "click or " + m.keys.ToggleInput.Help().Key + " to show"
 		}
-		text := ansi.Truncate(fmt.Sprintf("⋯ %d lines hidden · %s", len(c.ed.lines), show), innerW, "…")
+		lines := "lines"
+		if len(c.ed.lines) == 1 {
+			lines = "line"
+		}
+		text := ansi.Truncate(fmt.Sprintf("⋯ %d %s hidden · %s", len(c.ed.lines), lines, show), innerW, "…")
 		r.lines = append(r.lines, bar+label+side+" "+padRight(st.Render(text), innerW)+" "+side)
 		r.zones = append(r.zones, zone{rect: image.Rect(gutterWidth+2, r.edTop, gutterWidth+2+lipgloss.Width(text), r.edTop+1), act: act, tip: withKey("show the cell's code", m.keys.ToggleInput)})
 	} else {
@@ -846,12 +850,15 @@ func (m *Model) cellActions(lb *lineBuilder, i int, frame lipgloss.Style, markdo
 		convIcon = "go"
 	}
 	btns := []btn{
-		run,
 		{convAct, "⇄" + convIcon, convTip, false},
 		{action{kind: actMoveUp, cell: i}, "↑", withKey("move cell up", m.keys.MoveUp), false},
 		{action{kind: actMoveDown, cell: i}, "↓", withKey("move cell down", m.keys.MoveDown), false},
 		{action{kind: actDuplicate, cell: i}, "⧉", "duplicate cell", false},
 		{action{kind: actDeleteCell, cell: i}, "✕", withKey("delete cell", m.keys.Delete), true},
+	}
+	// Raw cells never run, so a run button would do nothing.
+	if c.kind != notebook.Raw {
+		btns = append([]btn{run}, btns...)
 	}
 	if c.kind == notebook.Code {
 		btns = append(btns, btn{action{kind: actFormatCell, cell: i}, "fmt", "format Go code · alt+shift+f", false})

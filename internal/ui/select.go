@@ -92,6 +92,7 @@ type cellUndo struct {
 	errMsg                string
 	ran                   bool
 	splitTop, splitBottom string
+	merged                string // the merge result, to detect later edits
 	placeholder           *Cell
 }
 
@@ -142,6 +143,11 @@ func (m *Model) undoCells() tea.Cmd {
 			if m.cellBusy(u.target) {
 				m.pushCellUndo(u)
 				return m.setStatus(statusInfo, "can't undo merge: cell is running or queued")
+			}
+			// Like split undo: restoring the old sources would drop edits.
+			if u.target.ed.Value() != u.merged {
+				m.pushCellUndo(u)
+				return m.setStatus(statusInfo, "can't undo merge: cell changed")
 			}
 			u.target.ed.SetValue(u.src)
 			u.target.ed.breakUndo()
@@ -221,8 +227,9 @@ func (m *Model) mergeCells() tea.Cmd {
 		}
 	}
 	c := m.cells[lo]
-	m.pushCellUndo(cellUndo{kind: undoMerge, cells: slices.Clone(m.cells[lo+1 : hi+1]), index: lo + 1, target: c, src: c.ed.Value(), outputs: c.outputs, images: slices.Clone(c.images), count: c.count, status: c.status, errMsg: c.errMsg, ran: c.ran})
-	c.ed.SetValue(mergedSource(c.kind, m.cells[lo:hi+1]))
+	merged := mergedSource(c.kind, m.cells[lo:hi+1])
+	m.pushCellUndo(cellUndo{kind: undoMerge, cells: slices.Clone(m.cells[lo+1 : hi+1]), index: lo + 1, target: c, src: c.ed.Value(), merged: merged, outputs: c.outputs, images: slices.Clone(c.images), count: c.count, status: c.status, errMsg: c.errMsg, ran: c.ran})
+	c.ed.SetValue(merged)
 	c.ed.breakUndo()
 	m.clearCellOutput(c)
 	c.errMsg, c.ran = "", false

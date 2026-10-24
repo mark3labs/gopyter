@@ -635,10 +635,12 @@ func (m *Model) openContextMenu(x, y int) tea.Cmd {
 			}
 			items = append(items, menuItem{label: label, key: m.keys.ScrollRight.Help().Key, act: a(actToggleWrap)})
 		}
+		// Copy takes the clicked cell's output; clear applies to the range.
+		if len(c.outputs) > 0 {
+			items = append(items, menuItem{label: "Copy output", key: m.keys.CopyOutput.Help().Key, act: a(actCopyOutput)})
+		}
 		if len(c.outputs) > 0 || m.multiSelected() {
-			items = append(items,
-				menuItem{label: "Copy output", key: m.keys.CopyOutput.Help().Key, act: a(actCopyOutput)},
-				menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
+			items = append(items, menuItem{label: "Clear output", key: m.keys.ClearOutput.Help().Key, act: a(actClearOutput)})
 		}
 	}
 	if c.kind != notebook.Code {
@@ -792,9 +794,7 @@ func (m *Model) doAction(a action) tea.Cmd {
 	case actSplitCell:
 		return m.splitCell(a.cell)
 	case actToRaw:
-		if validCell {
-			m.convertCell(a.cell, notebook.Raw)
-		}
+		return m.commandKey(a.cell, "to_raw")
 	case actToggleInput:
 		if validCell {
 			c := m.cells[a.cell]
@@ -835,7 +835,10 @@ func (m *Model) doAction(a action) tea.Cmd {
 		}
 	case actDuplicate:
 		if validCell {
-			m.cells = append(m.cells[:a.cell+1], append([]*Cell{m.cells[a.cell].clone()}, m.cells[a.cell+1:]...)...)
+			// Duplicates start with visible input (README).
+			dup := m.cells[a.cell].clone()
+			dup.setInputHidden(false)
+			m.cells = append(m.cells[:a.cell+1], append([]*Cell{dup}, m.cells[a.cell+1:]...)...)
 			m.sel = a.cell + 1
 			m.collapse()
 			m.dirty = true

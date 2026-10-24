@@ -886,16 +886,19 @@ func (m *Model) runCommand(name string, repeat bool) tea.Cmd {
 		m.moveBlock(lo, hi, -1)
 	case "move_down":
 		m.moveBlock(lo, hi, 1)
-	case "to_markdown", "to_code":
+	case "to_markdown", "to_code", "to_raw":
 		kind := notebook.Markdown
-		if name == "to_code" {
+		switch name {
+		case "to_code":
 			kind = notebook.Code
+		case "to_raw":
+			kind = notebook.Raw
 		}
 		for i := lo; i <= hi; i++ {
 			m.setCellKind(i, kind)
 		}
-	case "to_raw":
-		return m.doAction(action{kind: actToRaw, cell: m.sel})
+	case "save":
+		return m.saveCmd()
 	case "toggle_input":
 		return m.doAction(action{kind: actToggleInput, cell: m.sel})
 	case "scroll_output_left":

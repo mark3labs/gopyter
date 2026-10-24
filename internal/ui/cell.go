@@ -164,7 +164,36 @@ func (c *Cell) hasTextOutput() bool {
 func (c *Cell) clone() *Cell {
 	n := newCell(c.kind, c.ed.Value())
 	n.outputs = append([]notebook.Output(nil), c.outputs...)
+	// Cut and paste moves a cell, so it keeps tags, visibility and the rest.
+	n.metadata = cloneMetadata(c.metadata)
 	return n
+}
+
+// cloneMetadata deep-copies JSON metadata, so edits to a copy (such as
+// setInputHidden) never reach the original.
+func cloneMetadata(md map[string]any) map[string]any {
+	if md == nil {
+		return nil
+	}
+	out := make(map[string]any, len(md))
+	for k, v := range md {
+		out[k] = cloneJSON(v)
+	}
+	return out
+}
+
+func cloneJSON(v any) any {
+	switch v := v.(type) {
+	case map[string]any:
+		return cloneMetadata(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = cloneJSON(e)
+		}
+		return out
+	}
+	return v
 }
 
 func (c *Cell) setKind(kind notebook.CellType) {
