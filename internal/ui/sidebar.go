@@ -2,7 +2,9 @@ package ui
 
 import (
 	"image"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
@@ -252,7 +254,7 @@ func (m *Model) renderSidebar(h int) ([]string, []zone) {
 				st = m.theme.linkHover
 			}
 			line := st.Bold(true).Render(name) + strings.Repeat(" ", max(w-lipgloss.Width(name)-lipgloss.Width(typ), 0)) + m.theme.muted.Italic(true).Render(typ)
-			lines = []string{line, m.theme.dim.Render("  " + ansi.Truncate(v.Value, w-2, "…"))}
+			lines = []string{line, m.theme.dim.Render("  " + ansi.Truncate(graphicText(v.Value), w-2, "…"))}
 		}
 		for dy, line := range lines {
 			row := y + dy
@@ -270,4 +272,22 @@ func (m *Model) renderSidebar(h int) ([]string, []zone) {
 		}
 	}
 	return out, zs
+}
+
+// graphicText escapes control characters (as Go would quote them), so a
+// value's escape sequences can't restyle or move the sidebar.
+func graphicText(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }

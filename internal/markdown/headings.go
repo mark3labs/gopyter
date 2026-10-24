@@ -6,6 +6,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
 	"github.com/yuin/goldmark/text"
+	"github.com/yuin/goldmark/util"
 )
 
 // Heading is an ATX or setext heading in markdown source.
@@ -30,7 +31,18 @@ func Headings(src string) []Heading {
 			if entering {
 				switch n := n.(type) {
 				case *ast.Text:
-					b.Write(n.Value(source))
+					// As rendered: escapes and entities resolved, soft
+					// breaks (multi-line setext headings) as spaces.
+					v := n.Value(source)
+					if _, code := n.Parent().(*ast.CodeSpan); !code {
+						v = util.UnescapePunctuations(util.ResolveNumericReferences(util.ResolveEntityNames(v)))
+					}
+					b.Write(v)
+					if n.SoftLineBreak() || n.HardLineBreak() {
+						b.WriteByte(' ')
+					}
+				case *ast.AutoLink:
+					b.Write(n.Label(source))
 				case *ast.String:
 					b.Write(n.Value)
 				}

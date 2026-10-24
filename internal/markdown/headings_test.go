@@ -12,3 +12,13 @@ func TestHeadings(t *testing.T) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
+
+// TestHeadingsAsRendered is a regression test: soft breaks, autolinks,
+// entities and escapes were dropped or kept raw.
+func TestHeadingsAsRendered(t *testing.T) {
+	got := Headings("Heading\nline two\n===\n# See <https://x.y> now\n# A &amp; B &#35;1\n# Tom\\'s `a\\'b`\n")
+	want := []Heading{{1, "Heading line two"}, {1, "See https://x.y now"}, {1, "A & B #1"}, {1, "Tom's a\\'b"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+}

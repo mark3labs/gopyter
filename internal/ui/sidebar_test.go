@@ -331,3 +331,18 @@ func TestSidebarFocusFallThrough(t *testing.T) {
 		t.Fatal("escape closed sidebar")
 	}
 }
+
+// TestSidebarVariableEscapes is a regression test: a value's escape
+// sequences restyled the sidebar or vanished as zero-width.
+func TestSidebarVariableEscapes(t *testing.T) {
+	m := sidebarModel()
+	m.toggleSidebar()
+	m.setSidePanel(panelVariables)
+	m.side.vars = []kernel.Variable{{Name: "v", Kind: "var", Type: "[]string", Value: "[\x1b[41mRED \x1b[2J]", CellID: "c"}}
+	m.k = nil
+	m.refreshVars()
+	lines, _ := m.renderSidebar(18)
+	if strings.Contains(lines[3], "\x1b[41m") || !strings.Contains(ansi.Strip(lines[3]), `[\x1b[41mRED \x1b[2J]`) {
+		t.Fatalf("%q", lines[3])
+	}
+}
