@@ -78,3 +78,21 @@ func TestKernel(t *testing.T) {
 		t.Fatalf("cell6: %q %v", out, err)
 	}
 }
+
+// TestSyntaxErrorStaysInCell is a regression test: an unclosed block ran
+// into the compat aliases after the cell, adding a "syntax error" for each
+// of them in gopyter_compat.go.
+func TestSyntaxErrorStaysInCell(t *testing.T) {
+	k := newTestKernel(t)
+	out, err := run(t, k, "1", `for i := range 3 { fmt.Print("progress`)
+	if err == nil || !strings.Contains(out, "In[1]:1") || strings.Contains(out, "gopyter_compat") {
+		t.Fatalf("%v:\n%s", err, out)
+	}
+	// The aliases still work, and the notebook can still replace them.
+	if out, err := run(t, k, "2", "Display(1)"); err != nil || out != "=> 1\n" {
+		t.Fatalf("%v %q", err, out)
+	}
+	if out, err := run(t, k, "3", "func Display(v any) { fmt.Println(\"mine\", v) }\nDisplay(2)"); err != nil || out != "mine 2\n" {
+		t.Fatalf("%v %q", err, out)
+	}
+}

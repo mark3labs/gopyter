@@ -126,6 +126,9 @@ func (k *Kernel) hoist(ctx context.Context, dir string, env []string, cellID str
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte(src), 0o644); err != nil {
 		return nil, nil
 	}
+	if err := writeCompat(dir, decls); err != nil {
+		return nil, nil
+	}
 	if err := writeVars(dir, decls); err != nil {
 		return nil, nil
 	}
