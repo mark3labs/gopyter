@@ -82,7 +82,9 @@ func testConfig(t *testing.T) (Config, gossh.Signer) {
 
 func TestServeRequiresAuthorizedKeys(t *testing.T) {
 	cfg, _ := testConfig(t)
-	for _, contents := range []string{"", "# comment\n", "garbage"} {
+	// An indented comment is a regression test: it passed here, then wish
+	// failed to parse it and refused every key.
+	for _, contents := range []string{"", "# comment\n", "garbage", "  # team keys\n" + string(gossh.MarshalAuthorizedKey(signer(t).PublicKey()))} {
 		p := filepath.Join(t.TempDir(), "auth")
 		if err := os.WriteFile(p, []byte(contents), 0o600); err != nil {
 			t.Fatal(err)

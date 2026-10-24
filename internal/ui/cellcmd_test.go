@@ -330,7 +330,8 @@ func TestSaveAsKey(t *testing.T) {
 	}
 	m.mode = modeEdit
 	m.handleKey(press('s', tea.ModAlt))
-	m.input.SetValue(filepath.Join(filepath.Dir(old), "missing", "fail.ipynb"))
+	// Under a regular file: save creates missing directories, not this.
+	m.input.SetValue(filepath.Join(old, "fail.ipynb"))
 	m.handleKey(synthKey("enter"))
 	if m.path != path || m.statusKind != statusError {
 		t.Fatal("failed save changed path")

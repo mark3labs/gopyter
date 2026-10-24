@@ -18,7 +18,7 @@ type highlighter struct {
 
 // newHighlighter uses the named chroma style, or the fallback if unknown.
 func newHighlighter(name string) *highlighter {
-	st := styles.Get(name)
+	st := getStyle(name)
 	if st == nil {
 		st = styles.Fallback
 	}

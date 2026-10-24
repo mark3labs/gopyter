@@ -104,3 +104,40 @@ running:
 		t.Fatal("run channel still open")
 	}
 }
+
+// TestConcurrentSessionsNonDefaultTheme is a regression test: sessions
+// built at once with a derived-style theme (most themes) wrote chroma's
+// style registry concurrently, crashing gopyter serve. Run with -race.
+func TestConcurrentSessionsNonDefaultTheme(t *testing.T) {
+	if err := UseTheme("dracula", true); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = UseTheme(DefaultTheme, true) })
+	done := make(chan struct{})
+	for range 8 {
+		go func() {
+			defer func() { done <- struct{}{} }()
+			for range 5 {
+				m := New(Options{FixedTheme: true, Theme: "dracula", Kernel: &kernel.Kernel{}})
+				m.width, m.height = 80, 24
+				m.renderScreen()
+			}
+		}()
+	}
+	for range 8 {
+		<-done
+	}
+}
+
+// TestSaveCreatesDirectory is a regression test: a new notebook in a
+// missing subdirectory (ssh … sub/new.ipynb) couldn't be saved.
+func TestSaveCreatesDirectory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sub", "new.ipynb")
+	m := New(Options{Path: path})
+	if err := m.save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}

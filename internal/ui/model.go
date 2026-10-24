@@ -1251,6 +1251,11 @@ func (m *Model) toNotebook() *notebook.Notebook {
 }
 
 func (m *Model) save() error {
+	// A new notebook may name a directory that doesn't exist yet (serve
+	// accepts "sub/new.ipynb"); create it like the file.
+	if err := os.MkdirAll(filepath.Dir(m.path), 0o755); err != nil {
+		return err
+	}
 	if err := m.toNotebook().Save(m.path); err != nil {
 		return err
 	}

@@ -111,10 +111,15 @@ func New(cfg Config) (*ssh.Server, error) {
 		return nil, err
 	}
 	valid := false
+	// Follow wish's rules, which re-read the file on every login: only a
+	// "#" in the first column starts a comment, and a line that doesn't
+	// parse rejects every key.
 	for line := range strings.SplitSeq(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
 			continue
+		}
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			return nil, fmt.Errorf("invalid authorized_keys: comment %q must start in the first column", strings.TrimSpace(line))
 		}
 		if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(line)); err != nil {
 			return nil, fmt.Errorf("invalid authorized_keys: %w", err)

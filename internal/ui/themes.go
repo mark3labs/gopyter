@@ -161,12 +161,24 @@ func ValidTheme(name string) bool {
 	return ok
 }
 
+// chromaMu guards chroma's style registry, a plain map: serve builds
+// sessions (New → applyTheme) concurrently, and registering a derived
+// style while another session looks one up crashed the server.
+var chromaMu sync.RWMutex
+
+// getStyle is styles.Get under chromaMu.
+func getStyle(name string) *chroma.Style {
+	chromaMu.RLock()
+	defer chromaMu.RUnlock()
+	return styles.Get(name)
+}
+
 // syntaxStyle returns the chroma style for p, registering a derived style
 // (so the markdown renderer can find it by name too) when the palette
 // doesn't name one.
 func syntaxStyle(themeName string, p palette, dark bool) *chroma.Style {
 	if p.syntax != "" {
-		if st := styles.Get(p.syntax); st != nil {
+		if st := getStyle(p.syntax); st != nil {
 			return st
 		}
 	}
@@ -193,6 +205,8 @@ func syntaxStyle(themeName string, p palette, dark bool) *chroma.Style {
 		// A malformed color degrades to the fallback rather than failing.
 		return styles.Fallback
 	}
+	chromaMu.Lock()
+	defer chromaMu.Unlock()
 	return styles.Register(st)
 }
 
@@ -204,7 +218,7 @@ func newMarkdown(codeTheme string, codeBg color.Color) *markdown.Renderer {
 		Warning: colWarning, Success: colSuccess, Error: colError,
 		Code: colOrange, Text: colText, Muted: colMuted, Subtle: colSubtle,
 		CodeBg: codeBg,
-	}, styles.Get(codeTheme))
+	}, getStyle(codeTheme))
 }
 
 // blendHex linearly interpolates between two "#RRGGBB" colors by t (0–1).
