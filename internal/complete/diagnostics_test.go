@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
@@ -146,5 +147,55 @@ func TestGoplsDiagnostics(t *testing.T) {
 	ds, err = e.Diagnose(ctx, Request{CellID: "a", Src: "nb.Display(1)\nfmt.Printf(\"%d\\n\", \"s\")"})
 	if err != nil || len(ds) != 1 || ds[0].Severity != SeverityWarning || ds[0].Source != "printf" || ds[0].Row != 1 {
 		t.Fatalf("printf: %+v %v", ds, err)
+	}
+}
+
+// TestDiagnosticsWaitForDiagnosis is a regression test: gopls may publish
+// a version before diagnosing it (an empty list, clearing orphaned-file
+// diagnostics after the previous change), and Diagnose returned that
+// (TestGoplsDiagnostics failed on macOS CI).
+func TestDiagnosticsWaitForDiagnosis(t *testing.T) {
+	k, err := kernel.New("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k.Close() })
+	src := "var s string = 3"
+	cs := k.CompletionSource("a", src, 0, 0, nil)
+	line := cs.Segments[0].Line
+	e := &Engine{file: "/mirror.go", mirrors: map[int]mirror{2: {cellID: "a", src: src, cs: cs, sent: 2}}}
+	notify := func(method, params string) { e.notifyDiagnostics(method, json.RawMessage(params)) }
+	// The previous change (1) is still being diagnosed.
+	notify("$/progress", `{"token":"1","value":{"kind":"begin","title":"diagnosing changed files"}}`)
+	result := make(chan []Diagnostic, 1)
+	go func() {
+		ds, err := e.awaitDiagnostics(context.Background(), nil, Request{CellID: "a", Src: src}, 2, 2)
+		if err != nil {
+			t.Error(err)
+		}
+		result <- ds
+	}()
+	real := fmt.Sprintf(`{"uri":"file:///mirror.go","version":2,"diagnostics":[{"range":{"start":{"line":%d,"character":15},"end":{"line":%d,"character":16}},"severity":1,"message":"cannot use 3"}]}`, line, line)
+	for _, m := range [][2]string{
+		{"textDocument/publishDiagnostics", `{"uri":"file:///mirror.go","version":2,"diagnostics":[]}`},
+		{"$/progress", `{"token":"1","value":{"kind":"end"}}`},
+		{"$/progress", `{"token":"2","value":{"kind":"begin","title":"diagnosing changed files"}}`},
+		{"textDocument/publishDiagnostics", real},
+	} {
+		notify(m[0], m[1])
+		select {
+		case ds := <-result:
+			t.Fatalf("returned %+v before the diagnosis ended", ds)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	notify("$/progress", `{"token":"2","value":{"kind":"end"}}`)
+	select {
+	case ds := <-result:
+		if len(ds) != 1 || ds[0].Message != "cannot use 3" {
+			t.Fatalf("%+v", ds)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("still waiting")
 	}
 }

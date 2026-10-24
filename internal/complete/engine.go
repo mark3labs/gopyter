@@ -90,8 +90,15 @@ type Engine struct {
 
 	diagMu      sync.Mutex // notifications must never wait for RPCs under mu
 	publication diagnosticPublication
-	diagChanged chan struct{}
-	mirrors     map[int]mirror // guarded by mu
+	diagChanged chan struct{} // closed on a publication or progress
+	// gopls reports the diagnosis of each change as work done progress
+	// (verboseWorkDoneProgress), the only sign that a change's
+	// publications are complete: see Diagnose.
+	sent     int             // notifications sent that gopls diagnoses
+	begun    int             // diagnoses gopls started
+	working  map[string]bool // progress tokens of diagnoses in flight
+	progress bool            // gopls reports diagnoses
+	mirrors  map[int]mirror  // guarded by mu
 
 	stdOnce sync.Once
 	std     map[string]string // unambiguous package name -> import path
@@ -143,10 +150,12 @@ var goplsSettings = map[string]any{
 	"completionBudget":        "200ms",
 	// pkg.go.dev links are noise in a terminal popup.
 	"linksInHover": false,
+	// Report each change's diagnosis as progress (see Diagnose).
+	"verboseWorkDoneProgress": true,
 	// With a delay, gopls publishes type errors first and analyzer
-	// warnings (printf...) later at the same version; Diagnose returns
-	// the first publication, so the warnings would never show. A cell is
-	// one small package, so the full pass is cheap.
+	// warnings (printf...) only after it, at the same version, so every
+	// Diagnose would wait that long. A cell is one small package, so the
+	// full pass is cheap.
 	"diagnosticsDelay": "0s",
 }
 
@@ -204,6 +213,8 @@ func (e *Engine) start() error {
 		"initializationOptions": goplsSettings,
 		"capabilities": map[string]any{
 			"workspace": map[string]any{"configuration": true, "workspaceFolders": true},
+			// window/workDoneProgress/create gets a null reply.
+			"window": map[string]any{"workDoneProgress": true},
 			"textDocument": map[string]any{
 				"publishDiagnostics": map[string]any{"versionSupport": true},
 				"completion": map[string]any{
@@ -471,11 +482,14 @@ func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource,
 	}
 	e.mu.Unlock()
 
+	sent := 0 // each of these is diagnosed
 	if modChanged {
-		_ = client.Notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{
+		if client.Notify("workspace/didChangeWatchedFiles", map[string]any{"changes": []any{
 			map[string]any{"uri": fileURI(filepath.Join(e.k.Dir, "go.mod")), "type": 2},
 			map[string]any{"uri": fileURI(filepath.Join(e.k.Dir, "go.sum")), "type": 2},
-		}})
+		}}) == nil {
+			sent++
+		}
 	}
 	doc := map[string]any{"uri": e.uri, "version": version}
 	var err error
@@ -489,6 +503,19 @@ func (e *Engine) sync(client *lsp.Client, req Request) (kernel.CompletionSource,
 			"contentChanges": []any{map[string]string{"text": src.Content}},
 		})
 	}
+	if err == nil {
+		sent++
+	}
+	e.diagMu.Lock()
+	e.sent += sent
+	sent = e.sent
+	e.diagMu.Unlock()
+	e.mu.Lock()
+	if m, ok := e.mirrors[version]; ok {
+		m.sent = sent
+		e.mirrors[version] = m
+	}
+	e.mu.Unlock()
 	return src, version, err
 }
 

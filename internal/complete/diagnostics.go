@@ -43,11 +43,23 @@ type diagnosticPublication struct {
 type mirror struct {
 	cellID, src string
 	cs          kernel.CompletionSource
+	sent        int // Engine.sent once this version was sent
+}
+
+type progressParams struct {
+	Token json.RawMessage `json:"token"`
+	Value struct {
+		Kind, Title string
+	} `json:"value"`
 }
 
 var errStale = errors.New("diagnostics: superseded mirror")
 
 func (e *Engine) notifyDiagnostics(method string, params json.RawMessage) {
+	if method == "$/progress" {
+		e.notifyProgress(params)
+		return
+	}
 	if method != "textDocument/publishDiagnostics" {
 		return
 	}
@@ -66,6 +78,53 @@ func (e *Engine) notifyDiagnostics(method string, params json.RawMessage) {
 		return
 	}
 	e.publication = p
+	e.wakeLocked()
+}
+
+// syncDiagnoses are the titles of the diagnoses gopls starts for sync's
+// notifications (didOpen, didChange, didChangeWatchedFiles), in order. Any
+// other "diagnosing …" (the initial workspace load) is only waited for.
+var syncDiagnoses = map[string]bool{
+	"diagnosing opened files":          true,
+	"diagnosing changed files":         true,
+	"diagnosing files changed on disk": true,
+}
+
+// notifyProgress tracks gopls's diagnoses.
+func (e *Engine) notifyProgress(params json.RawMessage) {
+	var p progressParams
+	if json.Unmarshal(params, &p) != nil {
+		return
+	}
+	token := string(p.Token)
+	e.diagMu.Lock()
+	defer e.diagMu.Unlock()
+	switch p.Value.Kind {
+	case "begin":
+		if !strings.HasPrefix(p.Value.Title, "diagnosing ") {
+			return
+		}
+		if e.working == nil {
+			e.working = map[string]bool{}
+		}
+		e.working[token] = true
+		if syncDiagnoses[p.Value.Title] {
+			e.begun++
+		}
+		e.progress = true
+	case "end":
+		if !e.working[token] {
+			return
+		}
+		delete(e.working, token)
+	default:
+		return
+	}
+	e.wakeLocked()
+}
+
+// wakeLocked wakes the Diagnose calls waiting under diagMu.
+func (e *Engine) wakeLocked() {
 	if e.diagChanged != nil {
 		close(e.diagChanged)
 	}
@@ -97,6 +156,15 @@ func (e *Engine) Diagnose(ctx context.Context, req Request) ([]Diagnostic, error
 	if err != nil {
 		return nil, err
 	}
+	e.mu.Lock()
+	sent := e.mirrors[version].sent
+	e.mu.Unlock()
+	return e.awaitDiagnostics(ctx, client.Done(), req, version, sent)
+}
+
+// awaitDiagnostics waits for the complete diagnostics of mirror version,
+// the sent-th notification. done is closed when gopls exits.
+func (e *Engine) awaitDiagnostics(ctx context.Context, done <-chan struct{}, req Request, version, sent int) ([]Diagnostic, error) {
 	for {
 		e.diagMu.Lock()
 		p := e.publication
@@ -104,8 +172,15 @@ func (e *Engine) Diagnose(ctx context.Context, req Request) ([]Diagnostic, error
 			e.diagChanged = make(chan struct{})
 		}
 		changed := e.diagChanged
+		// A publication isn't necessarily final: gopls may publish a
+		// version before diagnosing it (an empty list, when it clears
+		// orphaned-file diagnostics after the previous change) and again
+		// once it has. Once gopls began diagnosing this change and no
+		// diagnosis is in flight, the last publication is complete.
+		// (Should the titles change, begun stays 0: settle when idle.)
+		settled := !e.progress || len(e.working) == 0 && (e.begun >= sent || e.begun == 0)
 		e.diagMu.Unlock()
-		if p.Version >= version {
+		if p.Version >= version && settled {
 			e.mu.Lock()
 			m, ok := e.mirrors[p.Version]
 			e.mu.Unlock()
@@ -117,7 +192,7 @@ func (e *Engine) Diagnose(ctx context.Context, req Request) ([]Diagnostic, error
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-client.Done():
+		case <-done:
 			return nil, nil
 		case <-changed:
 		}
