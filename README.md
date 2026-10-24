@@ -543,7 +543,8 @@ gopyter run notes.ipynb --fail-fast
 gopyter format notes.ipynb         # format code cells in place, without running
 ```
 
-It exits non-zero if any cell fails, so it works as a CI check for notebooks.
+It exits non-zero if any cell fails, so it works as a CI check for notebooks
+(130 or 143 when stopped by SIGINT or SIGTERM).
 On kitty/Ghostty, images use Kitty graphics, with the same `--graphics` override
 as the TUI. Graphics commands are never written to redirected output, even when
 colors are forced; it keeps half blocks or `[image WxH]` descriptions.

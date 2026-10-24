@@ -55,6 +55,10 @@ func Run(ctx context.Context, opts Options, in io.Reader, out io.Writer) error {
 			// forever, leaking the kernel workspace.
 			p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx), tea.WithoutSignalHandler())
 			_, err = p.Run()
+			// A signal ends the console like ctrl+d, as it does the notebook.
+			if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
+				err = nil
+			}
 			m.stop() // join the worker before reading cells for --save
 		}
 	} else {
@@ -111,7 +115,7 @@ func runLines(ctx context.Context, opts Options, sess *session, in io.Reader, ou
 		submit()
 	}
 	if failed > 0 {
-		return errors.Join(fmt.Errorf("%d inputs failed", failed), scan.Err(), ctx.Err())
+		return errors.Join(fmt.Errorf("%d input%s failed", failed, strings.Repeat("s", min(failed-1, 1))), scan.Err(), ctx.Err())
 	}
 	return errors.Join(scan.Err(), ctx.Err())
 }

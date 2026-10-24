@@ -345,11 +345,42 @@ func closeKernel(k *kernel.Kernel) {
 	}
 }
 
+// signalError is the cause of the context main cancels on a signal.
+type signalError struct{ sig os.Signal }
+
+func (e signalError) Error() string { return e.sig.String() }
+
+// exitCode is the status for a command's error: 128+n when signal n
+// stopped it, as shells do, so that scripts see the interruption.
+func exitCode(err, cause error) int {
+	if err == nil {
+		return 0 // e.g. serve shutting down cleanly
+	}
+	if s, ok := errors.AsType[signalError](cause); ok {
+		if n, ok := s.sig.(syscall.Signal); ok {
+			return 128 + int(n)
+		}
+	}
+	return 1
+}
+
 func main() {
 	kernel.Version = appVersion()
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
-	if err := fang.Execute(ctx, rootCmd(), fang.WithVersion(version), fang.WithCommit(commit)); err != nil {
-		os.Exit(1)
+	// Like signal.NotifyContext, but the cause says which signal it was.
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() { cancel(signalError{<-sigs}) }()
+	// Being stopped by a signal isn't an error to report ("context
+	// canceled"); the exit status says what happened.
+	quiet := func(w io.Writer, styles fang.Styles, err error) {
+		if _, ok := errors.AsType[signalError](context.Cause(ctx)); !ok {
+			fang.DefaultErrorHandler(w, styles, err)
+		}
+	}
+	err := fang.Execute(ctx, rootCmd(), fang.WithVersion(version), fang.WithCommit(commit), fang.WithErrorHandler(quiet))
+	if code := exitCode(err, context.Cause(ctx)); code != 0 {
+		os.Exit(code)
 	}
 }
