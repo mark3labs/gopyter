@@ -1319,7 +1319,10 @@ func NewProgram(ctx context.Context, opts Options) (*tea.Program, func()) {
 			}
 		}
 	}
-	terminal := append(slices.Clone(opts.Terminal), tea.WithContext(ctx), tea.WithFilter(m.filter))
+	// ctx carries shutdown (main's signal.NotifyContext; the session for
+	// serve). Bubble Tea's own SIGINT/SIGTERM handler would race it: after
+	// ctx ends, its send blocks forever and Run never returns.
+	terminal := append(slices.Clone(opts.Terminal), tea.WithContext(ctx), tea.WithoutSignalHandler(), tea.WithFilter(m.filter))
 	p := tea.NewProgram(m, terminal...)
 	m.send = p.Send
 	return p, m.shutdown

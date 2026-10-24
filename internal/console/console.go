@@ -50,7 +50,10 @@ func Run(ctx context.Context, opts Options, in io.Reader, out io.Writer) error {
 			if f, ok := out.(interface{ Fd() uintptr }); ok {
 				m.outputFD = f.Fd()
 			}
-			p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx))
+			// ctx ends on SIGINT/SIGTERM (main's signal.NotifyContext);
+			// Bubble Tea's own handler would race it and can block Run
+			// forever, leaking the kernel workspace.
+			p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out), tea.WithContext(ctx), tea.WithoutSignalHandler())
 			_, err = p.Run()
 			m.stop() // join the worker before reading cells for --save
 		}
