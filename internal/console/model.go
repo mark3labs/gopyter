@@ -162,7 +162,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) key(msg tea.KeyPressMsg) tea.Cmd {
 	key := msg.String()
 	if key == "ctrl+l" {
-		return tea.ClearScreen
+		// Inline, ClearScreen only clears and repaints the live region;
+		// clear the whole screen first, leaving the cursor at the top for
+		// the repaint (moving up from there stops at the first row).
+		return tea.Sequence(tea.Raw("\x1b[2J\x1b[H"), tea.ClearScreen)
 	}
 	if m.run != nil {
 		switch key {

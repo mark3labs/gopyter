@@ -375,6 +375,40 @@ func TestLineWriter(t *testing.T) {
 	}
 }
 
+// TestLineWriterCarriageReturn is a regression test: "\r" cleared the line
+// at once, so CRLF lines came out blank and progress lines never showed.
+func TestLineWriterCarriageReturn(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ch := make(chan string, 10)
+	w := &lineWriter{ctx: ctx, ch: ch}
+	_, _ = w.Write([]byte("abc\r\ndef\r\n"))
+	if a, b := <-ch, <-ch; a != "abc" || b != "def" {
+		t.Fatalf("%q %q", a, b)
+	}
+	_, _ = w.Write([]byte("10%\r"))
+	if w.partial() != "10%" {
+		t.Fatal(w.partial())
+	}
+	_, _ = w.Write([]byte("100%\r"))
+	if w.partial() != "100%" {
+		t.Fatal(w.partial())
+	}
+	w.flush()
+	if got := <-ch; got != "100%" {
+		t.Fatal(got)
+	}
+	// Styled as the runner paints it on a terminal: the escapes after \r
+	// print nothing, so they don't overwrite the line.
+	_, _ = w.Write([]byte("\x1b[31mabc\r\x1b[m\n\x1b]8;;x\x1b\\p1\r\x1b[1mp2\r\x1b[m"))
+	if got := <-ch; got != "\x1b[31mabc\x1b[m" {
+		t.Fatalf("%q", got)
+	}
+	if got := w.partial(); got != "\x1b[1mp2\x1b[m" {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestCellMagicEnter(t *testing.T) {
 	m, lines := testModel(t)
 	m.ta.SetValue("%%bash\necho magic")
