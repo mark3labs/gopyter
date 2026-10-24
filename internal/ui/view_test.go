@@ -54,6 +54,29 @@ func TestHelpColumnsKeepGap(t *testing.T) {
 	}
 }
 
+// TestHelpEntriesFit keeps every help entry, AI and vim ones included,
+// within its column, so none is cut with "…" ("split cell (edit…").
+func TestHelpEntriesFit(t *testing.T) {
+	for _, sec := range newKeyMap().fullHelp(true, true, true) {
+		// Mirrors renderOverlay: a key column of 8-12, 25 columns in all.
+		keyWidth := 8
+		for _, b := range sec.keys {
+			if b.Enabled() {
+				keyWidth = max(keyWidth, min(12, ansi.StringWidth(b.Help().Key)+1))
+			}
+		}
+		for _, b := range sec.keys {
+			if !b.Enabled() {
+				continue
+			}
+			h := b.Help()
+			if ansi.StringWidth(h.Key) > keyWidth-1 || ansi.StringWidth(h.Desc) > 25-keyWidth {
+				t.Errorf("%s: %q %q doesn't fit (key column %d)", sec.title, h.Key, h.Desc, keyWidth)
+			}
+		}
+	}
+}
+
 func numberedOutput(n int) string {
 	var b strings.Builder
 	for i := range n {

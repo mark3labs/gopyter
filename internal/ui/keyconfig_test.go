@@ -10,6 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/kernel"
+	"github.com/mark3labs/gopyter/internal/notebook"
 )
 
 func TestKeyCommandsCoverKeyMap(t *testing.T) {
@@ -264,5 +265,50 @@ func TestConflictPriorityKeepsDefaultBeforeOverrides(t *testing.T) {
 	k, w = newKeyMapFrom(map[string][]string{"save": {"ctrl+g"}, "run_all": {"ctrl+g"}, "undo": {"ctrl+g"}})
 	if len(w) != 2 || !slices.Contains(k.Save.Keys(), "ctrl+g") {
 		t.Fatalf("global priority: %v", w)
+	}
+}
+
+// TestCopySelectionIgnoresInterrupt is a regression test: ^c copied a
+// selection only while it was the interrupt key.
+func TestCopySelectionIgnoresInterrupt(t *testing.T) {
+	for _, keys := range [][]string{{"f5"}, {}} {
+		m := New(Options{Keys: map[string][]string{"interrupt": keys}})
+		m.cur().ed.InsertText("hello")
+		alt(m, 'a')
+		m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+		if m.textClip != "hello" {
+			t.Fatalf("interrupt %v: copied %q", keys, m.textClip)
+		}
+	}
+}
+
+func TestFormatKeyReserved(t *testing.T) {
+	_, warnings := newKeyMapFrom(map[string][]string{"help": {"alt+shift+f"}})
+	if len(warnings) != 1 || !strings.Contains(warnings[0], "reserved") {
+		t.Fatalf("warnings %v", warnings)
+	}
+}
+
+// TestHintsFollowKeys is a regression test: cell placeholders and the vim
+// normal footer named the default keys.
+func TestHintsFollowKeys(t *testing.T) {
+	nb := notebook.New()
+	nb.Cells = []*notebook.Cell{{ID: "a", Type: notebook.Code}, {ID: "b", Type: notebook.Markdown}}
+	m := New(Options{Notebook: nb, Kernel: &kernel.Kernel{}, Keys: map[string][]string{"run_advance": {"f5"}, "edit": {"f6"}}})
+	m.mode = modeCommand
+	m.width, m.height = 100, 30
+	view := ansi.Strip(m.View().Content)
+	for _, want := range []string{"f6 to edit, f5 to run", "empty markdown cell · edit · f6"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("missing %q in\n%s", want, view)
+		}
+	}
+	for _, b := range m.keys.vimNormalShort() {
+		if b.Help().Desc == "run & next" && b.Help().Key != "f5" {
+			t.Errorf("vim footer shows %q", b.Help().Key)
+		}
+	}
+	if b := vimRunAdvance(newKeyMap().RunAdvance); b.Help().Key != "⇧↵" || slices.Contains(b.Keys(), "ctrl+r") {
+		t.Errorf("default vim run & next: %q %v", b.Help().Key, b.Keys())
 	}
 }

@@ -2,6 +2,8 @@ package ui
 
 import (
 	"image"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -110,7 +112,7 @@ func TestPaletteRunsCommand(t *testing.T) {
 		t.Fatal("delete must run at once")
 	}
 	m.openPalette()
-	paletteQuery(m, "undo delete/merge/split")
+	paletteQuery(m, "undo cell change")
 	m.handleKey(press(tea.KeyEnter, 0))
 	if len(m.undo) != 0 || m.cur() != original {
 		t.Fatal("undelete failed")
@@ -133,7 +135,7 @@ func TestPaletteOpensOverlays(t *testing.T) {
 func TestPaletteAvailability(t *testing.T) {
 	m, _ := newPickerModel(t, "", false)
 	m.openPalette()
-	for _, s := range []string{"interrupt", "paste below", "undo delete/merge/split", "input line", "fold output", "clear output", "copy output", "clear all outputs", "to code"} {
+	for _, s := range []string{"interrupt", "paste below", "undo cell change", "input line", "fold output", "clear output", "copy output", "clear all outputs", "to code"} {
 		if paletteFind(m, s) >= 0 {
 			t.Errorf("unavailable: %s", s)
 		}
@@ -216,7 +218,7 @@ func TestPaletteCoversKeyMap(t *testing.T) {
 	}
 	// Split needs an active editor cursor, just like the Editing section;
 	// "extend selection" is the mouse-only ⇧click hint.
-	excluded := map[string]bool{"split cell (editing)": true, "extend selection": true, "up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
+	excluded := map[string]bool{"split (editing)": true, "extend selection": true, "up": true, "down": true, "page up": true, "page down": true, "command mode": true, "use widgets": true, "done (input)": true}
 	for _, sec := range m.keys.baseHelp() {
 		if sec.title == "Editing" {
 			continue
@@ -341,7 +343,7 @@ func TestPaletteSelectionCommands(t *testing.T) {
 	wantRange(t, m, 0, 1)
 	run("merge cells")
 	wantSources(t, m, "a\n\nb", "c")
-	run("undo delete/merge/split")
+	run("undo cell change")
 	wantSources(t, m, "a", "b", "c")
 	run("select all cells")
 	wantRange(t, m, 0, 2)
@@ -349,7 +351,7 @@ func TestPaletteSelectionCommands(t *testing.T) {
 	if len(m.cells) != 1 || m.cur().ed.Value() != "" {
 		t.Fatal("palette delete did not delete the selected range")
 	}
-	run("undo delete/merge/split")
+	run("undo cell change")
 	wantSources(t, m, "a", "b", "c")
 }
 
@@ -389,5 +391,22 @@ func TestPaletteConfiguredKeys(t *testing.T) {
 	m.runPalette(0)
 	if m.overlay != overlayNone {
 		t.Fatal("unbound command did not run")
+	}
+}
+
+// TestPaletteSave is a regression test: save from the palette did nothing.
+func TestPaletteSave(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "n.ipynb")
+	m := New(Options{Path: path, Notebook: notebook.New()})
+	m.dirty = true
+	m.openPalette()
+	paletteQuery(m, "save")
+	if i := paletteFind(m, "save"); i < 0 {
+		t.Fatal("no save row")
+	} else {
+		m.runPalette(i)
+	}
+	if _, err := os.Stat(path); err != nil || m.dirty {
+		t.Fatalf("not saved: %v", err)
 	}
 }

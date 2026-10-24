@@ -126,6 +126,10 @@ func parseKey(s string) (string, error) {
 			result += m + "+"
 		}
 	}
+	if result+base == "alt+shift+f" {
+		// handleKey checks it before any binding, so it could never fire.
+		return "", fmt.Errorf("%q is reserved for format Go code", s)
+	}
 	return result + base, nil
 }
 

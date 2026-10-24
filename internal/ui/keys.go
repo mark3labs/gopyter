@@ -83,7 +83,7 @@ func newKeyMap() keyMap {
 		ExtendDown:     b([]string{"alt+down"}, "alt+↓", "extend down"),
 		SelectAll:      b([]string{"alt+a"}, "alt+a", "select all cells"),
 		Merge:          b([]string{"alt+m"}, "alt+m", "merge cells"),
-		Split:          b([]string{"alt+-"}, "alt+-", "split cell (editing)"),
+		Split:          b([]string{"alt+-"}, "alt+-", "split (editing)"),
 		Up:             b([]string{"up", "k"}, "↑/k", "up"),
 		Down:           b([]string{"down", "j"}, "↓/j", "down"),
 		Top:            b([]string{"g", "home"}, "g", "first cell"),
@@ -94,7 +94,7 @@ func newKeyMap() keyMap {
 		InsertAbove:    b([]string{"a"}, "a", "insert above"),
 		InsertBelow:    b([]string{"b"}, "b", "insert below"),
 		Delete:         b([]string{"d"}, "dd", "delete"),
-		Undelete:       b([]string{"z", "u"}, "z", "undo delete/merge/split"),
+		Undelete:       b([]string{"z", "u"}, "z", "undo cell change"),
 		Cut:            b([]string{"x"}, "x", "cut"),
 		Copy:           b([]string{"c"}, "c", "copy"),
 		Paste:          b([]string{"v", "p"}, "v", "paste below"),
@@ -164,6 +164,15 @@ func withKey(desc string, b key.Binding) string {
 	return desc + " · " + b.Help().Key
 }
 
+// keyHint returns "key to desc", or "" for an unbound command, so
+// placeholder text follows the configured keys.
+func keyHint(b key.Binding, desc string) string {
+	if !b.Enabled() {
+		return ""
+	}
+	return b.Help().Key + " to " + desc
+}
+
 // hint is a help-only binding.
 func hint(keys, desc string) key.Binding {
 	return key.NewBinding(key.WithKeys(keys), key.WithHelp(keys, desc))
@@ -182,8 +191,22 @@ func (k keyMap) inputShort(line bool) []key.Binding {
 func (k keyMap) vimNormalShort() []key.Binding {
 	return []key.Binding{
 		hint("i", "insert"), hint("v", "visual"), hint("esc", "command mode"),
-		hint("⇧↵", "run & next"), hint("u", "undo"), k.Save,
+		vimRunAdvance(k.RunAdvance), hint("u", "undo"), k.Save,
 	}
+}
+
+// vimRunAdvance drops ctrl+r from run & next: vim normal mode uses it for redo.
+func vimRunAdvance(b key.Binding) key.Binding {
+	var keys []string
+	for _, k := range b.Keys() {
+		if k != "ctrl+r" {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return key.NewBinding(key.WithDisabled())
+	}
+	return key.NewBinding(key.WithKeys(keys...), key.WithHelp(prettyKeys(keys), b.Help().Desc))
 }
 
 // vimInsertShort returns the footer hints for vim insert mode.
@@ -210,10 +233,10 @@ func (k keyMap) fullHelp(vim, aiAvailable, aiOn bool) []helpSection {
 	}
 	if vim {
 		secs = append(secs, helpSection{"Vim (edit mode)", []key.Binding{
-			hint("i a o", "insert / open line"),
+			hint("i a o", "insert/open line"),
 			hint("esc", "normal / command"),
 			hint("v V", "visual / line"),
-			hint("d c y", "delete/change/yank"),
+			hint("d c y", "del/change/yank"),
 			hint("dd yy", "whole lines"),
 			hint("x D C", "char / line end"),
 			hint("p P", "put"),

@@ -536,10 +536,11 @@ func (m *Model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.doAction(action{kind: actSaveAs})
 	case key.Matches(msg, k.Save):
 		return m.saveCmd()
+	case m.mode == modeEdit && msg.String() == "ctrl+c" && m.cur().ed.HasSelection():
+		// Copying a selection is a fixed editing key (like ^x), not the
+		// configurable interrupt binding.
+		return m.doAction(action{kind: actCopyText, cell: m.sel})
 	case key.Matches(msg, k.Interrupt):
-		if m.mode == modeEdit && m.cur().ed.HasSelection() {
-			return m.doAction(action{kind: actCopyText, cell: m.sel})
-		}
 		if m.busy() {
 			return m.interrupt()
 		}

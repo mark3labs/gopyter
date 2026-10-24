@@ -441,7 +441,7 @@ func (m *Model) renderMarkdownPanel(src string, boxW int) string {
 	var body []string
 	if strings.TrimSpace(src) == "" {
 		body = []string{bg.Foreground(colMuted).Italic(true).Width(mdW).
-			Render(ansi.Truncate("empty markdown cell · press enter to edit", mdW, "…"))}
+			Render(ansi.Truncate(withKey("empty markdown cell · edit", m.keys.Edit), mdW, "…"))}
 	} else {
 		body = m.mdPanel.Render(src, mdW, colFaint)
 	}
@@ -621,9 +621,14 @@ func (m *Model) renderCell(i, width int) cellRender {
 		if c.ed.Value() == "" && !editing {
 			// Placeholder hint on empty cells.
 			idx := r.edTop
-			hintText := "Go code… (enter to edit, shift+enter to run)"
+			hints := []string{keyHint(m.keys.Edit, "edit"), keyHint(m.keys.RunAdvance, "run")}
 			if m.editable(c) {
-				hintText = "Go code… (enter to edit, shift+enter to run, e to ask AI)"
+				hints = append(hints, keyHint(m.keys.Ask, "ask AI"))
+			}
+			hints = slices.DeleteFunc(hints, func(s string) bool { return s == "" })
+			hintText := "Go code…"
+			if len(hints) > 0 {
+				hintText += " (" + strings.Join(hints, ", ") + ")"
 			}
 			// Narrow cells cut the hint rather than overflow the box.
 			hintText = ansi.Truncate(hintText, max(innerW-lipgloss.Width(ev.lines[0]), 0), "…")

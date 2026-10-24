@@ -252,6 +252,15 @@ func (m *Model) renderPalette() (string, []zone) {
 	p.visible = clamp(m.height-2-2*dlgPadY-6, 3, 16)
 	p.top = clamp(p.top, max(p.idx-p.visible+1, 0), p.idx)
 	p.top = clamp(p.top, 0, max(len(p.rows)-p.visible, 0))
+	// Size the section and key columns over all rows so they line up, and
+	// reserve them before truncating descriptions on narrow terminals.
+	keyW, secW := 0, 0
+	for _, hit := range p.rows {
+		keyW = max(keyW, lipgloss.Width(hit.cmd.binding.Help().Key))
+		secW = max(secW, lipgloss.Width(hit.cmd.section))
+	}
+	keyW, secW = min(keyW, width/3), min(secW, max(width/4-1, 0))
+	descW := width - 3 - keyW - secW - 2
 	var zones []zone
 	for row := 0; row < p.visible; row++ {
 		i := p.top + row
@@ -273,10 +282,6 @@ func (m *Model) renderPalette() (string, []zone) {
 		if hit.cmd.on != nil && hit.cmd.on(m) {
 			mark = "✓ "
 		}
-		// Reserve the right column before truncating the description on narrow terminals.
-		keyW := min(lipgloss.Width(h.Key), width/3)
-		secW := min(lipgloss.Width(hit.cmd.section), max(width/4-1, 0))
-		descW := width - 3 - keyW - secW - 2
 		desc := lipgloss.StyleRunes(h.Desc, hit.match, base.Underline(true), base)
 		text := base.Render(mark) + padRight(ansi.Truncate(desc, descW, "…"), descW) + base.Render(" ") + t.muted.Render(padRight(ansi.Truncate(hit.cmd.section, secW, "…"), secW)+"  "+padLeft(ansi.Truncate(h.Key, keyW, "…"), keyW))
 		text = base.Render(padRight(text, width))
