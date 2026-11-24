@@ -111,17 +111,17 @@ func TestDiagnosticFooterMessage(t *testing.T) {
 	m.diag.items = f.items
 	for _, col := range []int{1, 2, 3} {
 		m.cur().ed.SetCursor(0, col)
-		if !strings.Contains(ansi.Strip(m.renderFooter()), "bad token") {
+		if !strings.Contains(ansi.Strip(footerText(m)), "bad token") {
 			t.Fatalf("footer at %d", col)
 		}
 	}
 	m.cur().ed.SetCursor(0, 4)
-	if strings.Contains(ansi.Strip(m.renderFooter()), "bad token") {
+	if strings.Contains(ansi.Strip(footerText(m)), "bad token") {
 		t.Fatal("outside range")
 	}
 	m.cur().ed.SetCursor(0, 2)
 	m.status = "priority"
-	footer := ansi.Strip(m.renderFooter())
+	footer := ansi.Strip(footerText(m))
 	if !strings.Contains(footer, "priority") || strings.Contains(footer, "bad token") {
 		t.Fatal(footer)
 	}

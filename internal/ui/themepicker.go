@@ -36,6 +36,7 @@ func (m *Model) applyTheme(name string) {
 	}
 	m.themes.name = name
 	m.theme = newTheme()
+	m.themeStage()
 
 	st := syntaxStyle(name, p, m.themes.dark)
 	if m.themes.syntax != "" {

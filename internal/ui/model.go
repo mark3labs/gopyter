@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"bloomfx.dev/bloom"
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
@@ -113,10 +114,18 @@ type Options struct {
 	SaveVim func(on bool) error
 	// AI configures the optional AI features. When nil, none is shown.
 	AI *AIConfig
+	// Motion animates the UI: dialogs fade in, the sidebar slides, and so
+	// on. Without it every change is drawn at once.
+	Motion bool
 }
 
 // Model is the root Bubble Tea model.
 type Model struct {
+	// ui lays the screen out and draws it (see stage.go), and fx is what it
+	// animates.
+	ui *bloom.Root
+	fx motion
+
 	gfx            *termimg.Kitty
 	gfxGen         int
 	graphicsQueued bool
@@ -254,6 +263,7 @@ func New(opts Options) *Model {
 		name = DefaultTheme
 	}
 	m.applyTheme(name)
+	m.initStage(opts.Motion)
 	m.snapshotDisk()
 
 	// Start in edit mode on a fresh, empty notebook.
@@ -265,7 +275,8 @@ func New(opts Options) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tea.RequestWindowSize, watchTick()}
+	// bloom asks the terminal for its colors, which the effects blend with.
+	cmds := []tea.Cmd{tea.RequestWindowSize, watchTick(), m.ui.Init()}
 	if n := len(m.keyWarnings); n > 0 {
 		msg := m.keyWarnings[0]
 		if n > 1 {
@@ -299,7 +310,7 @@ func (m *Model) busy() bool { return m.running != nil || len(m.queue) > 0 }
 
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	mm, cmd := m.update(msg)
-	return mm, tea.Batch(cmd, m.diagnoseIfChanged())
+	return mm, tea.Batch(cmd, m.diagnoseIfChanged(), m.animate(msg))
 }
 
 func (m *Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {

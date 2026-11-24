@@ -38,17 +38,29 @@ type tocEntry struct {
 	text        string
 }
 
-func (m *Model) sidebarWidth() int {
+// sidebarSpace is the width the sidebar has when it is open: a quarter of
+// the terminal, within limits, or 0 when that leaves too little for the
+// notebook.
+func (m *Model) sidebarSpace() int {
 	w := clamp(m.width/4, sidebarMinW, sidebarMaxW)
-	if !m.side.open || m.width-w < notebookMinW {
+	if m.width-w < notebookMinW {
 		return 0
 	}
 	return w
 }
+
+// sidebarWidth is the width the sidebar takes from the notebook: its space
+// while it is open, and 0 otherwise. It is drawn sliding to that width (see
+// sidebarDrawn); everything else works with the width it is heading for.
+func (m *Model) sidebarWidth() int {
+	if !m.side.open {
+		return 0
+	}
+	return m.sidebarSpace()
+}
 func (m *Model) bodyWidth() int { return m.width - m.sidebarWidth() }
 func (m *Model) toggleSidebar() tea.Cmd {
-	w := clamp(m.width/4, sidebarMinW, sidebarMaxW)
-	if m.width-w < notebookMinW {
+	if m.sidebarSpace() == 0 {
 		return m.setStatus(statusInfo, "terminal too narrow for the sidebar")
 	}
 	m.side.open = !m.side.open
@@ -182,7 +194,8 @@ func (m *Model) handleSidebarKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 // Only unstyled headings are cached; all sidebar styles are rebuilt each
 // frame, so applyTheme needs no additional invalidation.
 func (m *Model) renderSidebar(h int) ([]string, []zone) {
-	w := m.sidebarWidth() - 1
+	// Its full width even while it slides shut, when it takes none.
+	w := max(m.sidebarSpace()-1, 0)
 	out := make([]string, h)
 	var zs []zone
 	sep := lipgloss.NewStyle().Foreground(colFaint).Render("│")

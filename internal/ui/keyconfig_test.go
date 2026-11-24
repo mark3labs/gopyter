@@ -120,7 +120,7 @@ func TestRebindDelete(t *testing.T) {
 		t.Fatal("old delete still works")
 	}
 	m.handleKey(synthKey("X"))
-	if !strings.Contains(ansi.Strip(m.renderFooter()), "X…") {
+	if !strings.Contains(ansi.Strip(footerText(m)), "X…") {
 		t.Fatal("missing pending hint")
 	}
 	m.handleKey(synthKey("X"))

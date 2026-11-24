@@ -44,6 +44,7 @@ go version            # required: cells are built with the Go toolchain on PATH
 | `gopyter format file.ipynb` | format Go code cells in place without execution; preserve commands, metadata and outputs; leave the file unchanged on syntax errors |
 | `--graphics auto\|kitty\|blocks` | choose image drawing for the TUI or `run`; auto detects kitty/Ghostty, redirected output stays text |
 | `--workdir DIR` | keep the kernel workspace (a Go module) in `DIR` instead of a temporary directory |
+| `--no-motion` | draw the TUI without animations (fading dialogs, the sliding sidebar); `"motion_off": true` in config.json saves it |
 | `gopyter themes`, `gopyter model` | list themes / show or set the optional AI model (TUI features) |
 
 In the TUI, `alt+shift+f` or the bottom-right `fmt` cell button formats the

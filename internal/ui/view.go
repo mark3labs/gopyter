@@ -8,9 +8,10 @@ import (
 	"strings"
 	"time"
 
+	"bloomfx.dev/bloom"
+	"bloomfx.dev/bloom/fx"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/mark3labs/gopyter/internal/htmlview"
 	"github.com/mark3labs/gopyter/internal/notebook"
@@ -37,70 +38,103 @@ func (m *Model) outWidth() int {
 
 func (m *Model) View() tea.View {
 	var v tea.View
+	if !m.quitting && m.width > 0 && m.height > 0 {
+		v = m.draw()
+		// Hover depends on the zones produced by rendering. If content moved
+		// under a stationary pointer (scrolling, clicks, output), re-derive the
+		// hover state and render once more so highlights and tooltips are exact.
+		if m.pointer.seen {
+			act, tip, cell := m.hoverAt(m.pointer.x, m.pointer.y)
+			if act != m.hover || cell != m.hoverCell || tip != m.hoverTip {
+				m.hover, m.hoverTip, m.hoverCell = act, tip, cell
+				v = m.draw()
+			}
+		}
+		m.sweepImages()
+	}
 	v.AltScreen = true
+	// The zones are hit-tested here, in Update, so the mode doesn't follow
+	// what bloom's own mouse handlers would need.
 	v.MouseMode = tea.MouseModeAllMotion
 	v.WindowTitle = "gopyter · " + m.displayName()
-	if m.quitting || m.width == 0 || m.height == 0 {
-		return v
-	}
-
-	screen, cursor := m.renderScreen()
-	// Hover depends on the zones produced by rendering. If content moved
-	// under a stationary pointer (scrolling, clicks, output), re-derive the
-	// hover state and render once more so highlights and tooltips are exact.
-	if m.pointer.seen {
-		act, tip, cell := m.hoverAt(m.pointer.x, m.pointer.y)
-		if act != m.hover || cell != m.hoverCell || tip != m.hoverTip {
-			m.hover, m.hoverTip, m.hoverCell = act, tip, cell
-			screen, cursor = m.renderScreen()
-		}
-	}
-	m.sweepImages()
-	v.SetContent(screen)
-	v.Cursor = cursor
+	// Animations slow down while the terminal isn't focused.
+	v.ReportFocus = m.fx.on
 	return v
 }
 
 // renderScreen renders the full screen, rebuilding the clickable zones.
 func (m *Model) renderScreen() (string, *tea.Cursor) {
+	v := m.draw()
+	return v.Content, v.Cursor
+}
+
+// draw renders a frame: the parts of the screen as strings, which bloom
+// lays out and composites (see tree), and the clickable zones of what was
+// drawn.
+func (m *Model) draw() tea.View {
 	m.zones = m.zones[:0]
-	body, cursor := m.renderBody()
+	var s screen
+	cursor := m.renderBody(&s)
 	// The info popup is laid out first: the footer hints depend on it.
-	var info string
-	var ix, iy int
 	if m.infoVisible() && cursor != nil {
-		info, ix, iy = m.renderInfo(cursor.X, cursor.Y)
+		content, x, y := m.renderInfo(cursor.X, cursor.Y)
+		s.info = &layer{content: content, at: &image.Point{X: x, Y: y}}
 	}
-	screen := strings.Join([]string{m.renderHeader(), body, m.renderFooter()}, "\n")
-	if info != "" {
-		screen = m.composite(screen, info, ix, iy, false)
-	}
+	s.header, s.toolbar, s.footer = m.renderHeader(), m.renderToolbar(), m.renderFooter()
 
 	if m.comp.open && m.overlay == overlayNone && m.mode == modeEdit && cursor != nil {
-		layer, x, y, zones := m.renderCompletion(cursor.X, cursor.Y)
-		screen = m.composite(screen, layer, x, y, false)
+		content, x, y, zones := m.renderCompletion(cursor.X, cursor.Y)
+		s.completion = &layer{content: content, at: &image.Point{X: x, Y: y}}
 		// The popup sits above everything else for hit-testing.
 		m.zones = append(m.zones, translate(zones, x, y)...)
 	}
 
 	if m.overlay != overlayNone {
-		layer, zones := m.renderOverlay()
-		lw, lh := lipgloss.Size(layer)
-		x, y := max((m.width-lw)/2, 0), max((m.height-lh)/2, 0)
-		if m.overlay == overlayMenu {
-			x = clamp(m.menu.x, 0, max(m.width-lw, 0))
-			y = m.menu.y + 1
-			if y+lh > m.height {
-				y = max(m.menu.y-lh, 0)
-			}
-		}
-		m.overlayRect = image.Rect(x, y, x+lw, y+lh)
-		screen = m.composite(screen, layer, x, y, m.overlay != overlayMenu)
-		// Only the overlay is interactive while it's open.
-		m.zones = translate(zones, x, y)
+		s.overlay = m.overlayLayer()
 		cursor = nil
 	}
-	return screen, cursor
+	moving := m.overlayMoving()
+	v := m.ui.View(m.width, m.height, m.tree(s))
+	v.Cursor = cursor
+	if s.overlay != nil {
+		m.placeOverlay(*s.overlay, moving)
+	}
+	return v
+}
+
+// overlayLayer renders the open overlay as a layer. Dialogs and pickers are
+// centered by bloom; the context menu opens at the pointer, below it when
+// there is room and above it otherwise.
+func (m *Model) overlayLayer() *layer {
+	content, zones := m.renderOverlay()
+	l := &layer{content: content, zones: zones, modal: m.overlay != overlayMenu}
+	if m.overlay == overlayMenu {
+		lw, lh := lipgloss.Size(content)
+		at := image.Pt(clamp(m.menu.x, 0, max(m.width-lw, 0)), m.menu.y+1)
+		if at.Y+lh > m.height {
+			at.Y = max(m.menu.y-lh, 0)
+		}
+		l.at = &at
+	}
+	return l
+}
+
+// placeOverlay records where bloom drew the overlay: its rectangle, for
+// clicks outside it, and its zones, the only interactive ones while it is
+// open. It also keeps the overlay to draw while it animates out.
+func (m *Model) placeOverlay(l layer, moving bool) {
+	r, ok := m.ui.Frame().Rect(idOverlay)
+	if !ok {
+		m.overlayRect, m.zones = image.Rectangle{}, m.zones[:0]
+		return
+	}
+	if moving && l.modal {
+		// The frame has the overlay where it was drawn, still rising.
+		r = r.Sub(image.Pt(0, m.rise()))
+	}
+	m.overlayRect = r
+	m.zones = translate(l.zones, r.Min.X, r.Min.Y)
+	m.fx.ghost, m.fx.ghostAt = l, r.Min
 }
 
 func (m *Model) displayName() string {
@@ -110,7 +144,10 @@ func (m *Model) displayName() string {
 	return m.path
 }
 
-func (m *Model) renderHeader() string {
+// renderHeader lays out the first line: the logo and notebook name on the
+// left, and the kernel's state on the right, which is what gives way on a
+// narrow terminal.
+func (m *Model) renderHeader() bloom.Child {
 	t := m.theme
 	logoText := " ◆ gopyter "
 	runes := []rune(logoText)
@@ -152,9 +189,12 @@ func (m *Model) renderHeader() string {
 		right = label + t.subtle.Render("  │  ") + right
 	}
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
-	line := left + strings.Repeat(" ", max(gap, 1)) + right
-	return ansi.Truncate(line, m.width, "") + "\n" + m.renderToolbar()
+	return bloom.Row(
+		bloom.Auto(bloom.Text(left).NoWrap()).Min(lipgloss.Width(left)),
+		bloom.Fixed(1, nil),
+		bloom.Space(),
+		bloom.Text(right).NoWrap(),
+	)
 }
 
 type toolItem struct {
@@ -219,7 +259,10 @@ func (m *Model) renderToolbar() string {
 	return lb.String()
 }
 
-func (m *Model) renderFooter() string {
+// renderFooter lays out the last line: the mode pill, then a status message,
+// a hint for what is under the cursor or pointer, or the key bindings,
+// whichever comes first, cut to the space left before the cell position.
+func (m *Model) renderFooter() bloom.Child {
 	t := m.theme
 	pill := t.modeCmd.Render("COMMAND")
 	bindings := m.keys.commandShort(m.cur().kind, m.fixable(m.cur()), m.editable(m.cur()))
@@ -260,51 +303,87 @@ func (m *Model) renderFooter() string {
 		lo, hi := m.selRange()
 		position = fmt.Sprintf("cells %d–%d/%d ", lo+1, hi+1, len(m.cells))
 	}
-	pos := t.muted.Render(position)
-	avail := m.width - lipgloss.Width(pill) - lipgloss.Width(pos) - 5
 
-	var mid string
-	if m.status != "" {
-		st := t.dim
-		icon := "•"
-		switch m.statusKind {
-		case statusSuccess:
-			st, icon = t.statusOK, "✓"
-		case statusError:
-			st, icon = t.statusErr, "✗"
-		}
-		mid = st.Render(icon + " " + m.status)
+	line := func(s string) bloom.Child { return bloom.Text(s).Truncate() }
+	var mid bloom.Child
+	if status, ok := m.footerStatus(); ok {
+		mid = status
 	} else if m.task.active {
-		mid = m.spinner.View() + lipgloss.NewStyle().Foreground(colPrimary).Render(" ✦ "+m.task.doing()) +
-			t.dim.Render(" · "+m.task.progress+" · ") + t.helpKey.Render("esc") + t.helpDesc.Render(" cancel")
+		mid = line(m.spinner.View() + lipgloss.NewStyle().Foreground(colPrimary).Render(" ✦ "+m.task.doing()) +
+			t.dim.Render(" · "+m.task.progress+" · ") + t.helpKey.Render("esc") + t.helpDesc.Render(" cancel"))
 	} else if m.infoVisible() && !m.info.loading {
-		mid = t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+		hint := t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
 		if len(m.info.lines) > m.info.rows {
-			mid = t.helpKey.Render("pgup/pgdn") + t.helpDesc.Render(" scroll · ") + mid
+			hint = t.helpKey.Render("pgup/pgdn") + t.helpDesc.Render(" scroll · ") + hint
 		}
+		mid = line(hint)
 	} else if m.comp.open && len(m.comp.items) > 0 {
-		mid = t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
+		mid = line(t.helpKey.Render("↑↓") + t.helpDesc.Render(" select · ") +
 			t.helpKey.Render("tab/↵") + t.helpDesc.Render(" accept · ") +
-			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss")
+			t.helpKey.Render("esc") + t.helpDesc.Render(" dismiss"))
 	} else if d, ok := m.diagAtCursor(); ok {
-		mid = diagIcon(d.Severity) + " " + t.dim.Render(d.Message)
+		mid = line(diagIcon(d.Severity) + " " + t.dim.Render(d.Message))
 	} else if m.hoverTip != "" {
-		mid = lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip)
+		mid = line(lipgloss.NewStyle().Foreground(colInfo).Render("› " + m.hoverTip))
 	} else if m.pendingKey != "" {
-		mid = t.dim.Render(m.pendingKey + "…")
+		mid = line(t.dim.Render(m.pendingKey + "…"))
 	} else if p := m.vim.pending(); p != "" && m.vimActive() {
-		mid = t.dim.Render(p + "…")
+		mid = line(t.dim.Render(p + "…"))
 	} else {
-		m.help.SetWidth(avail)
-		mid = m.help.ShortHelpView(bindings)
+		// The bindings are cut between two of them rather than through one,
+		// which takes the width they are given.
+		mid = bloom.LayoutFunc(func(ctx bloom.Context) bloom.Child {
+			help := m.help
+			help.SetWidth(ctx.Width())
+			return line(help.ShortHelpView(bindings))
+		})
 	}
-	mid = ansi.Truncate(mid, max(avail, 0), "…")
-	gap := m.width - lipgloss.Width(pill) - lipgloss.Width(mid) - lipgloss.Width(pos) - 2
-	return pill + "  " + mid + strings.Repeat(" ", max(gap, 0)) + pos
+	return bloom.Row(
+		bloom.Text(pill).NoWrap(),
+		bloom.Fixed(2, nil),
+		bloom.Fill(mid),
+		bloom.Fixed(3, nil),
+		bloom.Text(t.muted.Render(position)).NoWrap(),
+	)
 }
 
-// renderBody renders the scrollable list of cells and computes the cursor.
-func (m *Model) renderBody() (string, *tea.Cursor) {
+// footerStatus returns the status message for the footer, if there is one
+// to show: the one set, typed in as it arrives, or the last one while it
+// fades out.
+func (m *Model) footerStatus() (bloom.Child, bool) {
+	t := m.theme
+	text, kind := m.status, m.statusKind
+	moving := m.statusMoving()
+	if text == "" {
+		if !moving {
+			return nil, false
+		}
+		text, kind = m.fx.statusText, m.fx.statusKind
+	}
+	st, icon := t.dim, "•"
+	switch kind {
+	case statusSuccess:
+		st, icon = t.statusOK, "✓"
+	case statusError:
+		st, icon = t.statusErr, "✗"
+	}
+	node := bloom.Child(bloom.Text(st.Render(icon + " " + text)).Truncate())
+	if moving {
+		arrive := effects(fx.Typewriter{}, fade{})
+		if !m.fx.status.Shown() {
+			arrive = effects(fade{})
+		}
+		node = bloom.Transition(m.fx.status.Progress(), node, arrive...)
+	}
+	// The message is as wide as its text, not as the footer, so that it is
+	// typed in over its own length.
+	return bloom.Row(node, bloom.Space()), true
+}
+
+// renderBody renders the notebook into s: the cells in view, what the
+// scrollbar shows, and the sidebar. It registers their zones and returns
+// the cursor.
+func (m *Model) renderBody(s *screen) *tea.Cursor {
 	w := m.bodyWidth() - 1 // leave room for the scrollbar
 	vh := m.viewHeight()
 
@@ -375,56 +454,44 @@ func (m *Model) renderBody() (string, *tea.Cursor) {
 	}
 	visible(add.zones, addTop)
 
-	// Scrollbar geometry.
-	thumbStart, thumbLen := -1, 0
-	if len(all) > vh {
-		thumbLen = max(vh*vh/len(all), 1)
-		thumbStart = m.offset * (vh - thumbLen) / max(len(all)-vh, 1)
-	}
-	track := lipgloss.NewStyle().Foreground(colFaint).Render("│")
-	thumb := lipgloss.NewStyle().Foreground(colMuted).Render("┃")
-
-	out := make([]string, vh)
-	for y := range vh {
-		line := ""
-		if i := m.offset + y; i < len(all) {
-			line = all[i]
+	// bloom cuts the lines at the edge of the notebook and draws the
+	// scrollbar beside it.
+	s.cells = strings.Join(all[m.offset:min(m.offset+vh, len(all))], "\n")
+	s.total, s.visible, s.offset = len(all), vh, m.offset
+	if c := m.runningCell(); c != nil {
+		if i, _ := m.cellByID(c.id); i >= 0 && i < len(m.layout) {
+			l := m.layout[i]
+			top := l.top - m.offset
+			s.running = image.Rect(gutterWidth, top, w-cellMarginR, top+l.render.boxH)
+			s.started = c.started
 		}
-		line = padRight(ansi.Truncate(line, w, ""), w)
-		switch {
-		case thumbStart < 0:
-			line += " "
-		case y >= thumbStart && y < thumbStart+thumbLen:
-			line += thumb
-		default:
-			line += track
-		}
-		out[y] = line
 	}
 
-	if m.sidebarWidth() > 0 {
+	// The sidebar keeps its content while it slides shut, but not its zones.
+	if s.sidebarW = m.sidebarDrawn(); s.sidebarW > 0 {
 		side, zs := m.renderSidebar(vh)
-		for y := range out {
-			out[y] += side[y]
+		s.sidebar = strings.Join(side, "\n")
+		if m.sidebarWidth() > 0 {
+			m.zones = append(m.zones, translate(zs, m.bodyWidth(), headerHeight)...)
 		}
-		m.zones = append(m.zones, translate(zs, m.bodyWidth(), headerHeight)...)
 	}
-	var cursor *tea.Cursor
+
 	if m.mode == modeEdit && m.sel < len(m.layout) {
 		l := m.layout[m.sel]
 		if l.render.hasEdit {
 			y := l.top + l.render.edTop + l.render.ev.curY - m.offset
 			if y >= 0 && y < vh {
-				cursor = tea.NewCursor(l.render.edLeft+l.render.ev.curX, y+headerHeight)
+				cursor := tea.NewCursor(l.render.edLeft+l.render.ev.curX, y+headerHeight)
 				cursor.Shape = tea.CursorBar
 				if m.vimActive() {
 					cursor.Shape = tea.CursorBlock
 				}
 				cursor.Color = colSuccess
+				return cursor
 			}
 		}
 	}
-	return strings.Join(out, "\n"), cursor
+	return nil
 }
 
 // mdPadX is the horizontal padding inside a markdown cell's panel.
@@ -639,6 +706,7 @@ func (m *Model) renderCell(i, width int) cellRender {
 	footer, zones := m.cellFooter(i, boxW, bar, blank, border)
 	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
 	r.lines = append(r.lines, footer)
+	r.boxH = len(r.lines)
 
 	out, zones := m.cellOutputs(i, boxW, bar, blank)
 	r.zones = append(r.zones, translate(zones, 0, len(r.lines))...)
@@ -1164,30 +1232,4 @@ func (m *Model) renderMenu() (string, []zone) {
 	}
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colMuted)
 	return box.Render(strings.Join(rows, "\n")), zones
-}
-
-// composite draws a layer on top of the base screen using an ultraviolet
-// screen buffer, optionally dimming the backdrop.
-func (m *Model) composite(base, layer string, x, y int, dim bool) string {
-	w, h := m.width, m.height
-	buf := uv.NewScreenBuffer(w, h)
-	uv.NewStyledString(base).Draw(buf, buf.Bounds())
-
-	if dim {
-		for yy := range h {
-			for xx := range w {
-				c := buf.CellAt(xx, yy)
-				if c == nil || c.Width == 0 || strings.HasPrefix(c.Content, string(termimg.Placeholder)) {
-					continue
-				}
-				nc := *c
-				nc.Style = uv.Style{Fg: colSubtle}
-				buf.SetCell(xx, yy, &nc)
-			}
-		}
-	}
-
-	lw, lh := lipgloss.Size(layer)
-	uv.NewStyledString(layer).Draw(buf, uv.Rect(x, y, lw, lh))
-	return buf.Render()
 }

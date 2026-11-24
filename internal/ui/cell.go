@@ -224,7 +224,10 @@ type cellRender struct {
 	edLeft  int // column where the editor starts
 	ev      editorView
 	hasEdit bool
-	zones   []zone // clickable regions; y is relative to the cell's first line
+	// boxH is how many lines the cell's box takes, from its top border to its
+	// bottom one; the outputs follow it. Zero for a rendered markdown cell.
+	boxH  int
+	zones []zone // clickable regions; y is relative to the cell's first line
 	// ownSpacer is set when the last line doubles as the inter-cell spacer.
 	ownSpacer bool
 }

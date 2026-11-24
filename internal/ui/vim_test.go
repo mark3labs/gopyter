@@ -215,8 +215,8 @@ func TestVimModes(t *testing.T) {
 	if m.vim.pending() != "2d" {
 		t.Fatalf("pending: %q", m.vim.pending())
 	}
-	if !strings.Contains(m.renderFooter(), "2d…") {
-		t.Fatalf("footer lacks pending command: %q", m.renderFooter())
+	if !strings.Contains(footerText(m), "2d…") {
+		t.Fatalf("footer lacks pending command: %q", footerText(m))
 	}
 	vimType(m, "<esc><esc>")
 	if m.mode != modeCommand {

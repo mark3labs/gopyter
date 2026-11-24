@@ -36,6 +36,7 @@ Use this after any change to `internal/ui` (rendering, keys, mouse, dialogs, com
 
    - To target an element, find its coordinates from a capture instead of guessing, e.g. a Python one-liner over `tmux capture-pane -t gp -p` that prints the line number and `.index('Cancel')`
    - `sleep` after actions: about 0.3s for UI updates, 1–3s for cell execution, about 1.5s for gopls completion (longer on the first request)
+   - Dialogs, the sidebar and status messages animate for up to 0.2s; the 0.3s above lets them finish. Start gopyter with `--no-motion` when the check isn't about motion and a capture must never land mid-animation
 
 4. **Capture and inspect**:
    - Text: `tmux capture-pane -t gp -p` (use `sed -n 'A,Bp'` to show the relevant rows)

@@ -466,6 +466,25 @@ gopyter --theme dracula notes.ipynb  # use a theme for this session only
 gopyter --syntax-theme monokai     # override the code highlighting (any chroma style)
 ```
 
+## Motion
+
+The screen is laid out and animated with [bloom](https://bloomfx.dev). Dialogs,
+pickers and menus fade in over a dimmed notebook and cast a shadow, the sidebar
+slides open and shut, a status message is typed into the footer and fades out,
+and a light runs around the border of the cell that is running. All of it is
+short, and none of it changes what a key or a click does: the notebook is in
+its new state at once, and only the drawing follows.
+
+To draw every change at once instead, start with `--no-motion`, or turn motion
+off for good in [config.json](#themes):
+
+```json
+{ "motion_off": true }
+```
+
+That suits slow terminals and slow links; `gopyter serve` takes `--no-motion`
+too. While the terminal isn't focused, animations run at a lower frame rate.
+
 ## Images
 
 `--graphics=auto` (the default) detects kitty and Ghostty from the environment,
@@ -623,6 +642,7 @@ completion engine and kernel.
 | `--host-key FILE` | `gopyter/ssh_host_ed25519` in the user config directory; a missing ed25519 key is generated with mode 0600 |
 | `--theme NAME`, `--light` | saved theme, dark by default; one shared theme for all sessions, with the theme picker disabled |
 | `--vim`, `--no-complete`, `--model` | same per-session defaults as the local TUI; `--no-complete` avoids per-session gopls |
+| `--no-motion` | draw without [animations](#motion), for every session; the saved setting by default |
 
 `--workdir` is not supported: each session needs its own workspace. The startup
 log prints the address, authorized_keys path and host key's SHA256 fingerprint.
@@ -663,6 +683,11 @@ Reloading doesn't reset the kernel, so declarations from cells you already ran
 stay in effect. External edits to cell text can be undone.
 
 ## Acknowledgements
+
+The screen's layout, its layers and its motion are
+[bloom](https://bloomfx.dev)'s, by [Liam Stanley](https://github.com/lrstanley)
+(MIT license): gopyter describes the screen as a tree of bloom nodes, and the
+dimmed backdrops, shadows and transitions are bloom effects.
 
 The Contents and Variables sidebar is inspired by
 [euporie](https://github.com/joouha/euporie) (behavior, not code).

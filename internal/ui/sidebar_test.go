@@ -173,10 +173,10 @@ func TestSidebarJumpAndPanels(t *testing.T) {
 
 func TestSidebarLayout(t *testing.T) {
 	m := sidebarModel()
-	before, _ := m.renderBody()
+	before := bodyText(m)
 	m.toggleSidebar()
 	m.zones = nil
-	body, _ := m.renderBody()
+	body := bodyText(m)
 	for _, line := range strings.Split(body, "\n") {
 		if lipgloss.Width(line) != 120 {
 			t.Fatalf("width %d: %q", lipgloss.Width(line), line)
@@ -204,7 +204,7 @@ func TestSidebarLayout(t *testing.T) {
 	m.offset = 0
 	m.follow = true
 	m.toggleSidebar()
-	after, _ := m.renderBody()
+	after := bodyText(m)
 	if before != after {
 		t.Fatal("hidden rendering changed")
 	}

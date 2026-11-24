@@ -71,7 +71,7 @@ func setPalette(p palette) {
 }
 
 type theme struct {
-	text, dim, muted, subtle lipgloss.Style
+	text, dim, muted, subtle, faint lipgloss.Style
 
 	borderIdle, borderCmd, borderEdit, borderRun color.Color
 
@@ -100,6 +100,7 @@ func newTheme() theme {
 		dim:    s().Foreground(colDim),
 		muted:  s().Foreground(colMuted),
 		subtle: s().Foreground(colSubtle),
+		faint:  s().Foreground(colFaint),
 
 		borderIdle: colSubtle,
 		borderCmd:  colPrimary,

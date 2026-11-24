@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"fmt"
+	"image"
 	"reflect"
 	"strings"
 	"testing"
@@ -123,16 +125,43 @@ func TestKittyCellUndoKeepsImages(t *testing.T) {
 	}
 }
 
+// TestKittyDimKeepsImageIDs checks the backdrop of a dialog, and its shadow:
+// they fade what is beneath, but a placeholder's color is its image ID.
 func TestKittyDimKeepsImageIDs(t *testing.T) {
 	m := imageModel(t)
-	lines, _, _ := m.renderOutputs(m.cells[0], 80, false, "")
-	got := m.composite(lines[1], "", 0, 0, true)
-	buf := uv.NewScreenBuffer(m.width, m.height)
-	uv.NewStyledString(got).Draw(buf, buf.Bounds())
-	c := buf.CellAt(0, 0)
-	r, g, b, _ := c.Style.Fg.RGBA()
-	if !strings.HasPrefix(c.Content, string(termimg.Placeholder)) || r != 0 || g != 0 || b != 257 {
-		t.Fatalf("lost image color: %+v", c)
+	cells := func() *uv.ScreenBuffer {
+		screen, _ := m.renderScreen()
+		buf := uv.NewScreenBuffer(m.width, m.height)
+		uv.NewStyledString(screen).Draw(buf, buf.Bounds())
+		return &buf
+	}
+	plain := cells()
+	m.overlay = overlayQuit
+	dimmed := cells()
+	if m.overlayRect.Empty() {
+		t.Fatal("no dialog drawn")
+	}
+	images, faded := 0, 0
+	for y := range m.height {
+		for x := range m.width {
+			if image.Pt(x, y).In(m.overlayRect) {
+				continue
+			}
+			was, now := plain.CellAt(x, y), dimmed.CellAt(x, y)
+			same := fmt.Sprint(was.Style.Fg) == fmt.Sprint(now.Style.Fg)
+			switch {
+			case strings.HasPrefix(was.Content, string(termimg.Placeholder)):
+				images++
+				if r, g, b, _ := now.Style.Fg.RGBA(); now.Content != was.Content || r != 0 || g != 0 || b != 257 {
+					t.Fatalf("lost image color at %d,%d: %+v", x, y, now)
+				}
+			case strings.TrimSpace(was.Content) != "" && !same:
+				faded++
+			}
+		}
+	}
+	if images == 0 || faded == 0 {
+		t.Fatalf("%d image cells kept, %d other cells faded", images, faded)
 	}
 }
 

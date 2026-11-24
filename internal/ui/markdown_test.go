@@ -73,7 +73,7 @@ func TestCellsKeepClearOfScrollbar(t *testing.T) {
 	})
 	m.width, m.height = 60, 20
 	t.Cleanup(func() { setPalette(defaultTheme().palette(true)) })
-	body, _ := m.renderBody()
+	body := bodyText(m)
 	for l := range strings.SplitSeq(body, "\n") {
 		// Before the scrollbar column, the margin must be blank.
 		r := []rune(ansi.Strip(l))

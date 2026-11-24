@@ -8,7 +8,10 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 - Single Go module `github.com/mark3labs/gopyter` (Go 1.27). The CLI entry
   point is `main.go`; everything else lives under `internal/`.
 - The UI is built on the Charm **v2** stack: Bubble Tea, Bubbles, Lip Gloss
-  and Fang, plus Ultraviolet and chroma. Markdown is rendered with
+  and Fang, plus Ultraviolet and chroma. [bloom](https://bloomfx.dev)
+  (`bloomfx.dev/bloom`, pre-1.0: pinned, read its release notes before
+  bumping) lays the screen out, composites its layers and runs the
+  animations and effects. Markdown is rendered with
   [herald-md](https://github.com/indaco/herald-md). The CLI uses cobra
   wrapped by fang.
 - Cells are executed by generating a Go program and running `go build`
@@ -32,7 +35,7 @@ for Go that runs in the terminal. For the user-facing overview, see `README.md`.
 | `internal/kernel/runtime` | packages cell programs import: `nb` (gopyter's API) and the GoNB shim (`gonbui`, `widgets`, `comms`, `dom`, `protocol`, adapted from GoNB under its MIT license); stdlib only |
 | `internal/complete` | completion engine: gopls backend plus a basic fallback                    |
 | `internal/lsp`      | minimal JSON-RPC/LSP client (stdio)                                       |
-| `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup |
+| `internal/ui`       | the Bubble Tea app: editor, cells, mouse zones, dialogs, completion popup; the screen's bloom layout and motion (`stage.go`, `effects.go`) |
 | `skills/gopyter`    | agent skill (`SKILL.md`, installable with `npx skills add mark3labs/gopyter`); keep it in sync with user-visible behavior |
 | `scripts`           | tests for `install.sh` (run against a fake release; checked against `.goreleaser.yaml`) |
 
@@ -186,16 +189,53 @@ concatenation in WriteString") count as issues to fix too.
   re-implementing the behavior.
 - Dialog buttons come from `dialogButtons()`. It is the single source for
   rendering, focus cycling (`tab`, arrows) and mouse clicks.
-- Overlays (dialogs, the context menu, the completion popup) are composited
-  with Ultraviolet in `composite`. While an overlay is open, only its zones
+- **The screen is a bloom layout** (`stage.go`). The renderers in `view.go`
+  still produce strings and zones for each part; `draw` collects them in a
+  `screen`, and `tree` places them: a column of header, toolbar, the body row
+  (cells, `bloom.Scrollbar`, the sidebar's slot) and footer, under the popups
+  and the overlay as layers. Don't add size arithmetic for placing things:
+  give the part a slot (`Fixed`, `Fill`, `Auto(...).Min`), and where the
+  model needs to know where something went, give it an ID and read
+  `m.ui.Frame().Rect(id)` after drawing, as `placeOverlay` does for the
+  dialog's zones. The header and footer are built from nodes
+  (`renderHeader`, `renderFooter`); a part that needs its width takes it
+  from a `bloom.LayoutFunc`, as the key hints do. Read bloom's source and
+  docs (`docs/content` in the module) rather than assuming its API.
+- **Mouse input still goes through zones**, not bloom's `on` handlers: `View`
+  sets `MouseMode` itself and `Update` hit-tests `m.zones`. Moving a part to
+  bloom handlers means removing its zones too, or clicks are handled twice.
+- **Motion** (`motion` in `stage.go`) is only how a change is shown. State is
+  set as before (`m.overlay`, `m.status`, `m.side.open`); `syncMotion`, run
+  after every `Update`, notices the change and starts the presence or the
+  value (`m.fx.side`, the width the sidebar is drawn at). So nothing that
+  opens or closes something needs to know about motion, and a frame drawn
+  before `syncMotion` ran shows the state at once. Geometry outside drawing
+  (`bodyWidth`, zones, hit-testing) always uses the state being headed for,
+  never an in-between value. Every message must reach `animate` (bloom's
+  root and the animations), or animations stall. Prefer an `anim` value or
+  presence in `motion` over `Animate()` on a slot: a slot that keeps
+  `Animate()` makes the root ask for a frame after every message.
+  `Options.Motion` is off in tests (the zero value) and with `--no-motion` /
+  `"motion_off"`: every motion path must also draw correctly without it. To
+  test motion, turn it on and move the animations with `Advance`
+  (`TestSidebarSlides`, `TestOverlayFadesInAndOut`); never sleep.
+- Keep frames comparable and cheap: effects are plain structs (bloom skips a
+  frame equal to the last by comparing them with `==`), a transition wraps a
+  node only while it moves, and anything that repaints the whole screen per
+  frame is stepped (`dim.Steps`), which matters over SSH.
+- Overlays (dialogs, the context menu, the completion popup) are bloom
+  layers, composited in `tree`. While an overlay is open, only its zones
   are interactive.
 - Kitty images (`graphics.go`): View queues transmission/placement and sweeps
   references with `Retain` (including deleted cells and saved merge outputs in
   cell undo history). A coalesced asynchronous
   `graphicsMsg` lets Update emit `tea.Raw` outside the styled frame. Pixel cell
   size changes invalidate output caches; theme changes reuse image keys.
-  `composite` must exempt placeholders from backdrop dimming: their foreground
-  color is an image ID, not a decorative color.
+  Effects must leave placeholders alone: their foreground color is an image
+  ID, not a decorative color. bloom's own `fx.Dim` and `fx.Fade` recolor
+  them, so layers use the wrappers in `effects.go` (`dim`, `fade`), and any
+  new effect that can reach the notebook needs the same care
+  (`TestEffectsKeepImages`).
 - The editor (`editor.go`) is custom rather than `bubbles/textarea`. Edits go
   through `push()` for undo, and selection-aware operations must handle
   `HasSelection()`.
@@ -303,6 +343,12 @@ concatenation in WriteString") count as issues to fix too.
 
   tmux cannot send `shift+enter` or `ctrl+enter`. Use `ctrl+r` or `ctrl+j`,
   which do the same.
+
+  A capture shows the frame an animation ends on. To see motion itself,
+  record with [vhs](https://github.com/charmbracelet/vhs) when it's
+  installed: a `Screenshot` some tens of milliseconds after a key catches a
+  dialog half faded in. Pass `--no-motion` when motion would only get in the
+  way of a check.
 
 ## Pull requests and commits
 

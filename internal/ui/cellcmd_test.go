@@ -37,7 +37,7 @@ func TestConvertToRaw(t *testing.T) {
 	if c.kind != notebook.Raw || len(c.outputs) != 0 || c.count != 0 || !m.dirty {
 		t.Fatal("raw conversion did not clear execution state")
 	}
-	m.renderBody()
+	m.renderBody(&screen{})
 	m.openContextMenu(30, headerHeight+1)
 	labels := map[string]bool{}
 	for _, item := range m.menu.items {
@@ -84,7 +84,7 @@ func TestHideInputRenders(t *testing.T) {
 	}
 	// Screen-space zones must take precedence over editor click handling.
 	m.handleKey(synthKey("I"))
-	m.renderBody()
+	m.renderBody(&screen{})
 	for _, z := range m.zones {
 		if z.act.kind == actToggleInput {
 			m.handleMouseDown(tea.Mouse{X: z.rect.Min.X, Y: z.rect.Min.Y, Button: tea.MouseLeft})

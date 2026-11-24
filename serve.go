@@ -22,7 +22,7 @@ import (
 
 func serveCmd(workdir *string) *cobra.Command {
 	var listen, hostKey, authorized, theme, model string
-	var light, vim, noComplete bool
+	var light, vim, noComplete, noMotion bool
 	cmd := &cobra.Command{
 		Use: "serve [dir]", Short: "Serve the notebook TUI over SSH to trusted key holders",
 		Args: cobra.MaximumNArgs(1),
@@ -87,6 +87,7 @@ func serveCmd(workdir *string) *cobra.Command {
 						return opts, cleanup, err
 					}
 					opts.Keys = settings.Keys
+					opts.Motion = !noMotion && !settings.MotionOff
 					opts.Theme, opts.LightBackground = name, light
 					opts.Kernel.RunDir = root
 					if path != "" {
@@ -154,6 +155,7 @@ func serveCmd(workdir *string) *cobra.Command {
 	cmd.Flags().BoolVar(&light, "light", false, "use the light theme variant for every session")
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim bindings (default: saved setting)")
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable per-session gopls completion")
+	cmd.Flags().BoolVar(&noMotion, "no-motion", false, "draw without animations, which suits slow connections (default: saved setting)")
 	cmd.Flags().StringVar(&model, "model", "", "AI model, provider/model or off (default: saved model)")
 	return cmd
 }

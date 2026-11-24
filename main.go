@@ -67,6 +67,7 @@ func rootCmd() *cobra.Command {
 		noComplete bool
 		vim        bool
 		model      string
+		noMotion   bool
 	)
 	cmd := &cobra.Command{
 		Use:   "gopyter [notebook.ipynb]",
@@ -114,6 +115,7 @@ func rootCmd() *cobra.Command {
 			}
 			opts.Graphics = gfx
 			opts.Keys = settings.Keys
+			opts.Motion = !noMotion && !settings.MotionOff
 			defer cleanup()
 			opts.Theme, opts.SyntaxTheme, opts.SaveTheme = name, syntax, saveTheme
 			// Probe before the program owns stdin.
@@ -128,6 +130,7 @@ func rootCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&noComplete, "no-complete", false, "disable code completion (gopls)")
 	cmd.Flags().BoolVar(&vim, "vim", false, "use vim key bindings in edit mode for this session (toggle and save with V); the saved setting is used by default")
 	cmd.Flags().StringVar(&model, "model", "", "AI model for this session, as provider/model or a provider name, or off (see 'gopyter model'); the saved one is used by default")
+	cmd.Flags().BoolVar(&noMotion, "no-motion", false, "draw without animations for this session; \"motion_off\": true in config.json turns them off for good")
 
 	cmd.AddCommand(consoleCmd(&workdir), runCmd(&workdir, &graphics), formatCmd(), themesCmd(), modelCmd(), keysCmd(), serveCmd(&workdir))
 	return cmd

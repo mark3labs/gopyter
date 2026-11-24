@@ -34,6 +34,9 @@ type Settings struct {
 	// AIOff turns AI features off without forgetting AIModel. AI is on
 	// when AIModel is set and AIOff isn't.
 	AIOff bool `json:"ai_off,omitempty"`
+	// MotionOff draws every change at once instead of animating it: no
+	// fading dialogs, sliding sidebar or moving lights.
+	MotionOff bool `json:"motion_off,omitempty"`
 }
 
 // Path returns the location of the settings file.
